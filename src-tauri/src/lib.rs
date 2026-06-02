@@ -1,4 +1,5 @@
 mod gdrive;
+mod local;
 mod ssh;
 mod sync;
 mod vault;
@@ -15,6 +16,7 @@ use vault::{KnownHost, Vault, VaultData};
 struct AppState {
     vault: Arc<Vault>,
     ssh: SshManager,
+    local: local::LocalManager,
 }
 
 fn map_err<T>(r: anyhow::Result<T>) -> Result<T, String> {
@@ -333,6 +335,34 @@ async fn ssh_close(state: State<'_, AppState>, id: String) -> Result<(), String>
     map_err(state.ssh.close(&id).await)
 }
 
+// ---------- local terminal commands ----------
+
+#[tauri::command]
+fn local_open(
+    app: AppHandle,
+    state: State<AppState>,
+    id: String,
+    cols: u16,
+    rows: u16,
+) -> Result<(), String> {
+    map_err(state.local.open(app, id, cols, rows))
+}
+
+#[tauri::command]
+fn local_send(state: State<AppState>, id: String, data: String) {
+    state.local.send(&id, data.as_bytes());
+}
+
+#[tauri::command]
+fn local_resize(state: State<AppState>, id: String, cols: u16, rows: u16) {
+    state.local.resize(&id, cols, rows);
+}
+
+#[tauri::command]
+fn local_close(state: State<AppState>, id: String) {
+    state.local.close(&id);
+}
+
 // ---------- sftp commands ----------
 
 #[tauri::command]
@@ -610,6 +640,7 @@ pub fn run() {
             AppState {
                 vault: vault.clone(),
                 ssh: SshManager::new(vault),
+                local: local::LocalManager::new(),
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -637,6 +668,10 @@ pub fn run() {
             ssh_send,
             ssh_resize,
             ssh_close,
+            local_open,
+            local_send,
+            local_resize,
+            local_close,
             sftp_list,
             sftp_download,
             sftp_upload,

@@ -39,6 +39,14 @@ export const sshResize = (id: string, cols: number, rows: number) =>
   invoke<void>("ssh_resize", { id, cols, rows });
 export const sshClose = (id: string) => invoke<void>("ssh_close", { id });
 
+// ---- local terminal ----
+export const localOpen = (id: string, cols: number, rows: number) =>
+  invoke<void>("local_open", { id, cols, rows });
+export const localSend = (id: string, data: string) => invoke<void>("local_send", { id, data });
+export const localResize = (id: string, cols: number, rows: number) =>
+  invoke<void>("local_resize", { id, cols, rows });
+export const localClose = (id: string) => invoke<void>("local_close", { id });
+
 // ---- sftp ----
 export const sftpList = (hostId: string, path: string) =>
   invoke<SftpListing>("sftp_list", { hostId, path });

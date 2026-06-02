@@ -5,7 +5,16 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { SearchAddon } from "@xterm/addon-search";
 import { AlertTriangle, ArrowDown, ArrowUp, Pencil, RotateCw, X } from "lucide-react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { sshClose, sshOpenShell, sshResize, sshSend } from "../lib/api";
+import {
+  localClose,
+  localOpen,
+  localResize,
+  localSend,
+  sshClose,
+  sshOpenShell,
+  sshResize,
+  sshSend,
+} from "../lib/api";
 import { useStore, type Tab } from "../store/useStore";
 import { themeById } from "../lib/themes";
 import { HostModal } from "./modals/HostModal";
@@ -76,7 +85,7 @@ export function TerminalView({ tab }: { tab: Tab }) {
         navigator.clipboard
           .readText()
           .then((t) => {
-            if (t) sshSend(tab.id, t).catch(() => {});
+            if (t) (tab.kind === "local" ? localSend : sshSend)(tab.id, t).catch(() => {});
           })
           .catch(() => {});
         return false;
@@ -108,7 +117,9 @@ export function TerminalView({ tab }: { tab: Tab }) {
       });
 
       try {
-        await sshOpenShell(tab.id, tab.hostId, term.cols, term.rows);
+        await (tab.kind === "local"
+          ? localOpen(tab.id, term.cols, term.rows)
+          : sshOpenShell(tab.id, tab.hostId, term.cols, term.rows));
       } catch (err) {
         if (!disposed) {
           setTabStatus(tab.id, "error", String(err));
@@ -118,13 +129,15 @@ export function TerminalView({ tab }: { tab: Tab }) {
     })();
 
     const onData = term.onData((data) => {
-      sshSend(tab.id, data).catch(() => {});
+      (tab.kind === "local" ? localSend : sshSend)(tab.id, data).catch(() => {});
     });
 
     const doFit = () => {
       try {
         fit.fit();
-        sshResize(tab.id, term.cols, term.rows).catch(() => {});
+        (tab.kind === "local" ? localResize : sshResize)(tab.id, term.cols, term.rows).catch(
+          () => {},
+        );
       } catch {
         /* noop */
       }
@@ -140,7 +153,7 @@ export function TerminalView({ tab }: { tab: Tab }) {
       onData.dispose();
       unlistenData?.();
       unlistenClosed?.();
-      sshClose(tab.id).catch(() => {});
+      (tab.kind === "local" ? localClose : sshClose)(tab.id).catch(() => {});
       term.dispose();
       termRef.current = null;
       searchRef.current = null;
@@ -201,9 +214,11 @@ export function TerminalView({ tab }: { tab: Tab }) {
               <button className="btn-ghost px-3 py-1.5 text-xs" onClick={() => closeTab(tab.id)}>
                 <X size={14} /> Close
               </button>
-              <button className="btn-surface px-3 py-1.5 text-xs" onClick={() => setEditing(true)}>
-                <Pencil size={14} /> Edit host
-              </button>
+              {tab.kind === "ssh" && (
+                <button className="btn-surface px-3 py-1.5 text-xs" onClick={() => setEditing(true)}>
+                  <Pencil size={14} /> Edit host
+                </button>
+              )}
               <button
                 className="btn-primary px-3 py-1.5 text-xs"
                 onClick={() => {

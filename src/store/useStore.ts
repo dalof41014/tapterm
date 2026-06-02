@@ -22,6 +22,7 @@ export interface Tab {
   title: string;
   status: "connecting" | "connected" | "closed" | "error";
   error?: string;
+  kind: "ssh" | "local";
 }
 
 interface StoreState {
@@ -60,6 +61,7 @@ interface StoreState {
 
   // tab actions
   openHost: (hostId: string) => void;
+  openLocal: () => void;
   closeTab: (tabId: string) => void;
   clearTabs: () => void;
   setActiveTab: (tabId: string) => void;
@@ -149,7 +151,20 @@ export const useStore = create<StoreState>((set, get) => ({
     const host = get().vault.hosts.find((h) => h.id === hostId);
     if (!host) return;
     const id = nanoid(8);
-    const tab: Tab = { id, hostId, title: host.label, status: "connecting" };
+    const tab: Tab = { id, hostId, title: host.label, status: "connecting", kind: "ssh" };
+    set((s) => ({ tabs: [...s.tabs, tab], activeTabId: id }));
+  },
+
+  openLocal: () => {
+    const id = nanoid(8);
+    const n = get().tabs.filter((t) => t.kind === "local").length + 1;
+    const tab: Tab = {
+      id,
+      hostId: "",
+      title: n > 1 ? `Local ${n}` : "Local",
+      status: "connecting",
+      kind: "local",
+    };
     set((s) => ({ tabs: [...s.tabs, tab], activeTabId: id }));
   },
 

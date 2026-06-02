@@ -1,4 +1,4 @@
-import { FolderTree, Palette, Plus, Server, X } from "lucide-react";
+import { FolderTree, Palette, Plus, Server, SquarePlus, TerminalSquare, X } from "lucide-react";
 import { useStore } from "../store/useStore";
 import { TerminalView } from "./TerminalView";
 import { SftpPanel } from "./panels/SftpPanel";
@@ -9,6 +9,7 @@ export function Workspace() {
   const activeTabId = useStore((s) => s.activeTabId);
   const setActiveTab = useStore((s) => s.setActiveTab);
   const closeTab = useStore((s) => s.closeTab);
+  const openLocal = useStore((s) => s.openLocal);
   const rightPanel = useStore((s) => s.rightPanel);
   const setRightPanel = useStore((s) => s.setRightPanel);
   const hosts = useStore((s) => s.vault.hosts);
@@ -56,6 +57,13 @@ export function Workspace() {
               </div>
             );
           })}
+          <button
+            className="btn-ghost ml-1 shrink-0 p-1.5"
+            onClick={openLocal}
+            title="New local terminal"
+          >
+            <SquarePlus size={16} />
+          </button>
         </div>
 
         <button
@@ -116,6 +124,7 @@ export function Workspace() {
 }
 
 function EmptyState({ hasHosts }: { hasHosts: boolean }) {
+  const openLocal = useStore((s) => s.openLocal);
   return (
     <div className="flex h-full flex-col items-center justify-center gap-3 text-content-faint">
       <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-surface/60">
@@ -124,6 +133,9 @@ function EmptyState({ hasHosts }: { hasHosts: boolean }) {
       <p className="text-sm">
         {hasHosts ? "Double-click a host to open a session." : "Add a host from the sidebar to begin."}
       </p>
+      <button className="btn-surface mt-1 px-3 py-1.5 text-xs" onClick={openLocal}>
+        <TerminalSquare size={14} /> Open local terminal
+      </button>
       <p className="font-mono text-xs text-content-faint/70">SSH · SFTP · Port Forwarding</p>
     </div>
   );
