@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { nanoid } from "nanoid";
 import { Modal, Field } from "../ui/Modal";
+import { PasswordInput } from "../ui/PasswordInput";
 import { useStore } from "../../store/useStore";
 import type { AuthMethod, Host } from "../../lib/types";
 
@@ -131,9 +132,8 @@ export function HostModal({
           ))}
         </div>
         {authKind === "Password" && (
-          <input
+          <PasswordInput
             className="input"
-            type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             placeholder="Password"

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { ArrowRight, KeyRound, ShieldCheck, TerminalSquare } from "lucide-react";
 import { useStore } from "../store/useStore";
 import { vaultInit, vaultInitNopass, vaultUnlock } from "../lib/api";
+import { PasswordInput } from "./ui/PasswordInput";
 
 export function VaultGate() {
   const status = useStore((s) => s.status);
@@ -70,27 +71,20 @@ export function VaultGate() {
         <form onSubmit={submit} className="card p-6">
           <div className="mb-4">
             <label className="label">Master password</label>
-            <div className="relative">
-              <KeyRound
-                size={16}
-                className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-content-faint"
-              />
-              <input
-                autoFocus
-                type="password"
-                className="input pl-9"
-                placeholder="••••••••"
-                value={pw}
-                onChange={(e) => setPw(e.target.value)}
-              />
-            </div>
+            <PasswordInput
+              autoFocus
+              className="input pl-9"
+              leftIcon={<KeyRound size={16} />}
+              placeholder="••••••••"
+              value={pw}
+              onChange={(e) => setPw(e.target.value)}
+            />
           </div>
 
           {isNew && (
             <div className="mb-4">
               <label className="label">Confirm password</label>
-              <input
-                type="password"
+              <PasswordInput
                 className="input"
                 placeholder="••••••••"
                 value={confirm}

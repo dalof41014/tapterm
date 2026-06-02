@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { nanoid } from "nanoid";
 import { Modal, Field } from "../ui/Modal";
+import { PasswordInput } from "../ui/PasswordInput";
 import { useStore } from "../../store/useStore";
 import type { SshKey } from "../../lib/types";
 
@@ -53,9 +54,8 @@ export function KeyModal({ sshKey, onClose }: { sshKey?: SshKey; onClose: () => 
         />
       </Field>
       <Field label="Passphrase" hint="Leave empty if the key is not encrypted.">
-        <input
+        <PasswordInput
           className="input"
-          type="password"
           value={passphrase}
           onChange={(e) => setPassphrase(e.target.value)}
         />

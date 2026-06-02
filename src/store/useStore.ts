@@ -54,6 +54,7 @@ interface StoreState {
   // tab actions
   openHost: (hostId: string) => void;
   closeTab: (tabId: string) => void;
+  clearTabs: () => void;
   setActiveTab: (tabId: string) => void;
   setTabStatus: (tabId: string, status: Tab["status"], error?: string) => void;
 
@@ -137,6 +138,8 @@ export const useStore = create<StoreState>((set, get) => ({
         s.activeTabId === tabId ? tabs[tabs.length - 1]?.id ?? null : s.activeTabId;
       return { tabs, activeTabId };
     }),
+
+  clearTabs: () => set({ tabs: [], activeTabId: null }),
 
   setActiveTab: (tabId) => set({ activeTabId: tabId }),
 

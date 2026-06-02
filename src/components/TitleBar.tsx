@@ -9,10 +9,12 @@ export function TitleBar() {
   const status = useStore((s) => s.status);
   const noPassword = useStore((s) => s.noPassword);
   const refreshStatus = useStore((s) => s.refreshStatus);
+  const clearTabs = useStore((s) => s.clearTabs);
   const appWin = getCurrentWindow();
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   const onLock = async () => {
+    clearTabs();
     await vaultLock();
     await refreshStatus();
   };

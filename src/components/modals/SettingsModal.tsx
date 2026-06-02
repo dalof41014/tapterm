@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { Modal } from "../ui/Modal";
+import { PasswordInput } from "../ui/PasswordInput";
 import {
   gdriveConnect,
   gdriveDisconnect,
@@ -171,10 +172,9 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                           value={clientId}
                           onChange={(e) => setClientId(e.target.value)}
                         />
-                        <input
+                        <PasswordInput
                           className="input py-1.5 text-xs"
                           placeholder="Client Secret"
-                          type="password"
                           value={clientSecret}
                           onChange={(e) => setClientSecret(e.target.value)}
                         />
