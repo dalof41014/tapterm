@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Lock, Minus, Settings, Square, TerminalSquare, X } from "lucide-react";
 import { useStore } from "../store/useStore";
@@ -11,7 +10,8 @@ export function TitleBar() {
   const refreshStatus = useStore((s) => s.refreshStatus);
   const clearTabs = useStore((s) => s.clearTabs);
   const appWin = getCurrentWindow();
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const settingsOpen = useStore((s) => s.settingsOpen);
+  const setSettingsOpen = useStore((s) => s.setSettingsOpen);
 
   const onLock = async () => {
     clearTabs();

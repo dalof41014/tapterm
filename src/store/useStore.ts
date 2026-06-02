@@ -45,6 +45,8 @@ interface StoreState {
   setNoPassword: (v: boolean) => void;
   terminalThemeId: string;
   setTerminalTheme: (id: string) => void;
+  settingsOpen: boolean;
+  setSettingsOpen: (v: boolean) => void;
   // tabs
   tabs: Tab[];
   activeTabId: string | null;
@@ -125,6 +127,8 @@ export const useStore = create<StoreState>((set, get) => ({
     }
     set({ terminalThemeId: id });
   },
+  settingsOpen: false,
+  setSettingsOpen: (v) => set({ settingsOpen: v }),
   tabs: [],
   activeTabId: null,
 

@@ -6,6 +6,7 @@ import {
   Download,
   FolderSync,
   HardDrive,
+  Keyboard,
   Link2,
   Link2Off,
   Lock,
@@ -360,6 +361,31 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
             {upState === "none" && <span className="text-xs text-content-faint">You're up to date.</span>}
           </div>
         )}
+      </section>
+
+      <section className="mt-6 border-t border-line pt-5">
+        <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-content">
+          <Keyboard size={16} className="text-accent" /> Keyboard shortcuts
+        </h3>
+        <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-xs">
+          {[
+            ["Toggle sidebar", "Ctrl/⌘ B"],
+            ["New local terminal", "Ctrl/⌘ T"],
+            ["Switch to tab 1–9", "Ctrl/⌘ 1–9"],
+            ["Next / prev tab", "Ctrl/⌘ (Shift) Tab"],
+            ["Close tab", "Ctrl/⌘ Shift W"],
+            ["Settings", "Ctrl/⌘ ,"],
+            ["Copy / paste (terminal)", "Ctrl/⌘ Shift C / V"],
+            ["Find in terminal", "Ctrl/⌘ F"],
+          ].map(([label, keys]) => (
+            <div key={label} className="flex items-center justify-between gap-2">
+              <span className="text-content-muted">{label}</span>
+              <kbd className="shrink-0 rounded bg-bg-inset px-1.5 py-0.5 font-mono text-[10px] text-content-faint">
+                {keys}
+              </kbd>
+            </div>
+          ))}
+        </div>
       </section>
     </Modal>
   );
