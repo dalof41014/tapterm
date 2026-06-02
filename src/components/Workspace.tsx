@@ -1,4 +1,5 @@
-import { FolderTree, Palette, Plus, Server, SquarePlus, TerminalSquare, X } from "lucide-react";
+import { useState } from "react";
+import { Copy, FolderTree, Palette, Pencil, Plus, Server, SquarePlus, TerminalSquare, X } from "lucide-react";
 import { useStore } from "../store/useStore";
 import { TerminalView } from "./TerminalView";
 import { SftpPanel } from "./panels/SftpPanel";
@@ -10,6 +11,22 @@ export function Workspace() {
   const setActiveTab = useStore((s) => s.setActiveTab);
   const closeTab = useStore((s) => s.closeTab);
   const openLocal = useStore((s) => s.openLocal);
+  const openHost = useStore((s) => s.openHost);
+  const renameTab = useStore((s) => s.renameTab);
+  const [tabMenu, setTabMenu] = useState<{ x: number; y: number; id: string } | null>(null);
+  const [editing, setEditing] = useState<{ id: string; value: string } | null>(null);
+
+  const startRename = (id: string, current: string) => setEditing({ id, value: current });
+  const commitRename = () => {
+    if (editing) renameTab(editing.id, editing.value.trim() || "Terminal");
+    setEditing(null);
+  };
+  const duplicateTab = (id: string) => {
+    const t = tabs.find((x) => x.id === id);
+    if (!t) return;
+    if (t.kind === "local") openLocal();
+    else openHost(t.hostId);
+  };
   const rightPanel = useStore((s) => s.rightPanel);
   const setRightPanel = useStore((s) => s.setRightPanel);
   const hosts = useStore((s) => s.vault.hosts);
@@ -36,6 +53,12 @@ export function Workspace() {
               <div
                 key={t.id}
                 onClick={() => setActiveTab(t.id)}
+                onDoubleClick={() => startRename(t.id, t.title)}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  setActiveTab(t.id);
+                  setTabMenu({ x: e.clientX, y: e.clientY, id: t.id });
+                }}
                 className={`group flex h-11 min-w-0 max-w-[200px] shrink-0 cursor-pointer items-center gap-2 border-r border-line px-3.5 text-sm transition-colors duration-200 ${
                   active
                     ? "bg-bg-inset text-content"
@@ -43,7 +66,23 @@ export function Workspace() {
                 }`}
               >
                 <span className={`h-2 w-2 shrink-0 rounded-full ${statusDot(t.status)}`} />
-                <span className="truncate">{t.title}</span>
+                {editing?.id === t.id ? (
+                  <input
+                    autoFocus
+                    value={editing.value}
+                    onChange={(e) => setEditing({ id: t.id, value: e.target.value })}
+                    onBlur={commitRename}
+                    onClick={(e) => e.stopPropagation()}
+                    onDoubleClick={(e) => e.stopPropagation()}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") commitRename();
+                      if (e.key === "Escape") setEditing(null);
+                    }}
+                    className="min-w-0 flex-1 rounded bg-bg-inset px-1 py-0.5 text-sm text-content outline-none ring-1 ring-accent"
+                  />
+                ) : (
+                  <span className="truncate">{t.title}</span>
+                )}
                 <button
                   className="-mr-1 ml-1 rounded p-0.5 text-content-faint opacity-0 transition-opacity hover:bg-surface-active hover:text-content group-hover:opacity-100"
                   onClick={(e) => {
@@ -119,6 +158,40 @@ export function Workspace() {
           </div>
         )}
       </div>
+
+      {/* tab context menu */}
+      {tabMenu && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setTabMenu(null)} onContextMenu={(e) => { e.preventDefault(); setTabMenu(null); }} />
+          <div
+            className="fixed z-50 w-44 overflow-hidden rounded-xl border border-line-strong bg-bg-raised py-1 shadow-2xl animate-fade-in"
+            style={{ left: Math.min(tabMenu.x, window.innerWidth - 180), top: Math.min(tabMenu.y, window.innerHeight - 140) }}
+          >
+            <button
+              className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-content transition-colors duration-150 hover:bg-surface-hover"
+              onClick={() => {
+                const t = tabs.find((x) => x.id === tabMenu.id);
+                setTabMenu(null);
+                if (t) startRename(t.id, t.title);
+              }}
+            >
+              <Pencil size={15} /> Rename
+            </button>
+            <button
+              className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-content transition-colors duration-150 hover:bg-surface-hover"
+              onClick={() => { duplicateTab(tabMenu.id); setTabMenu(null); }}
+            >
+              <Copy size={15} /> Duplicate
+            </button>
+            <button
+              className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-danger transition-colors duration-150 hover:bg-danger/10"
+              onClick={() => { closeTab(tabMenu.id); setTabMenu(null); }}
+            >
+              <X size={15} /> Close
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }

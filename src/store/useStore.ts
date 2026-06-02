@@ -64,6 +64,7 @@ interface StoreState {
   openLocal: () => void;
   closeTab: (tabId: string) => void;
   clearTabs: () => void;
+  renameTab: (tabId: string, title: string) => void;
   setActiveTab: (tabId: string) => void;
   setTabStatus: (tabId: string, status: Tab["status"], error?: string) => void;
 
@@ -180,6 +181,9 @@ export const useStore = create<StoreState>((set, get) => ({
     }),
 
   clearTabs: () => set({ tabs: [], activeTabId: null }),
+
+  renameTab: (tabId, title) =>
+    set((s) => ({ tabs: s.tabs.map((t) => (t.id === tabId ? { ...t, title } : t)) })),
 
   setActiveTab: (tabId) => set({ activeTabId: tabId }),
 
