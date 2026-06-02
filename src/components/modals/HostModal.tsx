@@ -50,8 +50,12 @@ export function HostModal({
       os: host?.os ?? null,
       tags: tags.split(",").map((t) => t.trim()).filter(Boolean),
     };
-    await saveHost(next);
-    onClose();
+    try {
+      await saveHost(next);
+      onClose();
+    } catch (e) {
+      alert("Could not save host: " + String(e));
+    }
   };
 
   return (

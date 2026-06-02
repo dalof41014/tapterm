@@ -23,7 +23,7 @@ pub struct Group {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", tag = "kind", content = "value")]
+#[serde(tag = "kind", content = "value")]
 pub enum AuthMethod {
     Password(String),
     Key(String), // SshKey id
@@ -77,7 +77,6 @@ pub struct Snippet {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub enum ForwardKind {
     Local,
     Remote,
