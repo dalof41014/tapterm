@@ -334,7 +334,7 @@ interface Prog {
   itemCount: number;
   file: string;
   filePct: number;
-  totalPct: number;
+  overallPct: number;
 }
 
 export function FileManager() {
@@ -371,13 +371,14 @@ export function FileManager() {
         const tid = nanoid(8);
         const un = await listen<any>(`transfer://progress/${tid}`, (e) => {
           const p = e.payload;
+          const itemFrac = p.totalTotal > 0 ? p.totalDone / p.totalTotal : 1;
           setProgress({
             item: item.name,
             itemIndex: i,
             itemCount: items.length,
             file: p.currentFile,
             filePct: p.fileTotal > 0 ? Math.round((p.fileDone / p.fileTotal) * 100) : 100,
-            totalPct: p.totalTotal > 0 ? Math.round((p.totalDone / p.totalTotal) * 100) : 100,
+            overallPct: Math.round(((i + itemFrac) / items.length) * 100),
           });
         });
         try {
@@ -494,13 +495,14 @@ export function FileManager() {
                 const tid = nanoid(8);
                 const un = await listen<any>(`transfer://progress/${tid}`, (e) => {
                   const pr = e.payload;
+                  const itemFrac = pr.totalTotal > 0 ? pr.totalDone / pr.totalTotal : 1;
                   setProgress({
                     item: baseName(path),
                     itemIndex: i,
                     itemCount: paths.length,
                     file: pr.currentFile,
                     filePct: pr.fileTotal > 0 ? Math.round((pr.fileDone / pr.fileTotal) * 100) : 100,
-                    totalPct: pr.totalTotal > 0 ? Math.round((pr.totalDone / pr.totalTotal) * 100) : 100,
+                    overallPct: Math.round(((i + itemFrac) / paths.length) * 100),
                   });
                 });
                 try {
@@ -594,12 +596,15 @@ export function FileManager() {
                 item {progress.itemIndex + 1}/{progress.itemCount}
               </span>
             )}
-            <span className="shrink-0 tabular-nums text-accent">{progress.totalPct}%</span>
+            <span className={`shrink-0 tabular-nums text-content-faint ${progress.itemCount > 1 ? "" : "ml-auto"}`}>
+              file {progress.filePct}%
+            </span>
+            <span className="shrink-0 tabular-nums font-semibold text-accent">{progress.overallPct}%</span>
           </div>
           <div className="h-1.5 w-full overflow-hidden rounded-full bg-bg-inset">
             <div
               className="h-full rounded-full bg-accent transition-all duration-150"
-              style={{ width: `${progress.filePct}%` }}
+              style={{ width: `${progress.overallPct}%` }}
             />
           </div>
         </div>

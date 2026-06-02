@@ -75,6 +75,8 @@ interface StoreState {
   saveHost: (h: Host) => Promise<void>;
   duplicateHost: (id: string) => Promise<void>;
   deleteHost: (id: string) => Promise<void>;
+  moveHostsToGroup: (ids: string[], groupId: string | null) => Promise<void>;
+  deleteHosts: (ids: string[]) => Promise<void>;
   // key CRUD
   saveKey: (k: SshKey) => Promise<void>;
   deleteKey: (id: string) => Promise<void>;
@@ -224,6 +226,21 @@ export const useStore = create<StoreState>((set, get) => ({
   },
   deleteHost: async (id) => {
     set((s) => ({ vault: { ...s.vault, hosts: s.vault.hosts.filter((x) => x.id !== id) } }));
+    await get().persist();
+  },
+  moveHostsToGroup: async (ids, groupId) => {
+    const set2 = new Set(ids);
+    set((s) => ({
+      vault: {
+        ...s.vault,
+        hosts: s.vault.hosts.map((h) => (set2.has(h.id) ? { ...h, groupId } : h)),
+      },
+    }));
+    await get().persist();
+  },
+  deleteHosts: async (ids) => {
+    const set2 = new Set(ids);
+    set((s) => ({ vault: { ...s.vault, hosts: s.vault.hosts.filter((h) => !set2.has(h.id)) } }));
     await get().persist();
   },
 

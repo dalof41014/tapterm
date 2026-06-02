@@ -10,6 +10,7 @@ export function SnippetList() {
   const search = useStore((s) => s.search).toLowerCase();
   const deleteSnippet = useStore((s) => s.deleteSnippet);
   const activeTabId = useStore((s) => s.activeTabId);
+  const activeTab = useStore((s) => s.tabs.find((t) => t.id === s.activeTabId));
   const [editing, setEditing] = useState<Snippet | null>(null);
   const [creating, setCreating] = useState(false);
 
@@ -43,7 +44,7 @@ export function SnippetList() {
                   className="btn-ghost p-1 hover:text-accent disabled:opacity-30"
                   title="Run in active terminal"
                   disabled={!activeTabId}
-                  onClick={() => activeTabId && runSnippet(activeTabId, s.command)}
+                  onClick={() => activeTabId && runSnippet(activeTabId, s.command, activeTab?.kind ?? "ssh")}
                 >
                   <Play size={13} />
                 </button>
