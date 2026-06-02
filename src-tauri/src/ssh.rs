@@ -179,7 +179,9 @@ impl SshManager {
                         );
                     }
                 }
-                return Err(e.into());
+                return Err(anyhow::anyhow!(
+                    "could not connect to {host_key}: {e}"
+                ));
             }
         };
 

@@ -3,10 +3,11 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { SearchAddon } from "@xterm/addon-search";
-import { ArrowDown, ArrowUp, X } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowUp, Pencil, RotateCw, X } from "lucide-react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { sshClose, sshOpenShell, sshResize, sshSend } from "../lib/api";
 import { useStore, type Tab } from "../store/useStore";
+import { HostModal } from "./modals/HostModal";
 
 const THEME = {
   background: "#0B1220",
@@ -46,9 +47,13 @@ export function TerminalView({ tab }: { tab: Tab }) {
   const searchRef = useRef<SearchAddon | null>(null);
   const termRef = useRef<Terminal | null>(null);
   const setTabStatus = useStore((s) => s.setTabStatus);
+  const host = useStore((s) => s.vault.hosts.find((h) => h.id === tab.hostId));
+  const closeTab = useStore((s) => s.closeTab);
+  const openHost = useStore((s) => s.openHost);
 
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [editing, setEditing] = useState(false);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -177,10 +182,61 @@ export function TerminalView({ tab }: { tab: Tab }) {
   return (
     <div className="relative h-full w-full bg-[#0B1220]">
       {tab.status === "error" && (
-        <div className="absolute right-3 top-3 z-10 rounded-lg border border-danger/40 bg-danger/10 px-3 py-1.5 text-xs text-danger">
-          Connection failed
+        <div className="absolute inset-0 z-20 flex items-center justify-center bg-bg-inset/80 p-6 backdrop-blur-sm">
+          <div className="card w-full max-w-md p-5 shadow-2xl animate-fade-in">
+            <div className="mb-3 flex items-start gap-3">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-danger/15 text-danger">
+                <AlertTriangle size={20} />
+              </span>
+              <div className="min-w-0">
+                <h3 className="text-sm font-semibold text-content">Connection failed</h3>
+                {host && (
+                  <p className="truncate font-mono text-[11px] text-content-faint">
+                    {host.username}@{host.address}:{host.port}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div className="mb-3 max-h-32 overflow-y-auto rounded-lg bg-bg-inset px-3 py-2 font-mono text-[11px] leading-relaxed text-danger">
+              {tab.error || "Unknown error"}
+            </div>
+
+            {tab.error?.includes("10060") && (
+              <p className="mb-3 text-[11px] text-content-muted">
+                The host didn't respond (timeout). Check the address/port, that the server is online,
+                and that a firewall or VPN isn't blocking it.
+              </p>
+            )}
+            {tab.error?.toLowerCase().includes("authentication") && (
+              <p className="mb-3 text-[11px] text-content-muted">
+                Authentication was rejected — verify the username, password, or SSH key.
+              </p>
+            )}
+
+            <div className="flex justify-end gap-2">
+              <button className="btn-ghost px-3 py-1.5 text-xs" onClick={() => closeTab(tab.id)}>
+                <X size={14} /> Close
+              </button>
+              <button className="btn-surface px-3 py-1.5 text-xs" onClick={() => setEditing(true)}>
+                <Pencil size={14} /> Edit host
+              </button>
+              <button
+                className="btn-primary px-3 py-1.5 text-xs"
+                onClick={() => {
+                  const hid = tab.hostId;
+                  closeTab(tab.id);
+                  openHost(hid);
+                }}
+              >
+                <RotateCw size={14} /> Retry
+              </button>
+            </div>
+          </div>
         </div>
       )}
+
+      {editing && host && <HostModal host={host} onClose={() => setEditing(false)} />}
 
       {searchOpen && (
         <div className="absolute right-3 top-3 z-20 flex items-center gap-1 rounded-lg border border-line-strong bg-bg-raised p-1 shadow-xl animate-fade-in">
