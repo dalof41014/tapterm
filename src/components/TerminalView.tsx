@@ -12,9 +12,9 @@ import { HostModal } from "./modals/HostModal";
 const THEME = {
   background: "#0B1220",
   foreground: "#E2E8F0",
-  cursor: "#22C55E",
+  cursor: "#818CF8",
   cursorAccent: "#0B1220",
-  selectionBackground: "#22C55E40",
+  selectionBackground: "#6366F140",
   black: "#1E293B",
   red: "#F43F5E",
   green: "#22C55E",
@@ -37,8 +37,8 @@ const SEARCH_OPTS = {
   decorations: {
     matchBackground: "#FBBF24",
     matchOverviewRuler: "#FBBF24",
-    activeMatchBackground: "#22C55E",
-    activeMatchColorOverviewRuler: "#22C55E",
+    activeMatchBackground: "#6366F1",
+    activeMatchColorOverviewRuler: "#6366F1",
   },
 };
 

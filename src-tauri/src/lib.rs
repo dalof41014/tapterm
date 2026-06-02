@@ -442,6 +442,34 @@ async fn sftp_transfer(
     Ok(len)
 }
 
+/// Recursive file/dir transfer with progress events (`transfer://progress/<id>`).
+#[tauri::command]
+async fn transfer_start(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    src_host_id: Option<String>,
+    src_path: String,
+    dst_host_id: Option<String>,
+    dst_path: String,
+    is_dir: bool,
+) -> Result<(), String> {
+    let src = match &src_host_id {
+        Some(h) => Some(params_for(&state, h, 80, 24)?),
+        None => None,
+    };
+    let dst = match &dst_host_id {
+        Some(h) => Some(params_for(&state, h, 80, 24)?),
+        None => None,
+    };
+    map_err(
+        state
+            .ssh
+            .transfer_tree(app, id, src, src_path, dst, dst_path, is_dir)
+            .await,
+    )
+}
+
 /// Read a file (local or remote) and return its bytes as base64 — used for
 /// image previews. Capped to keep previews snappy.
 #[tauri::command]
@@ -615,6 +643,7 @@ pub fn run() {
             local_home,
             local_list,
             sftp_transfer,
+            transfer_start,
             file_read_b64,
             file_rename,
             file_mkdir,

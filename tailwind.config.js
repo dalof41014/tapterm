@@ -25,9 +25,9 @@ export default {
           faint: "#64748B", // slate-500
         },
         accent: {
-          DEFAULT: "#22C55E", // run/connect green
-          hover: "#16A34A",
-          soft: "rgba(34,197,94,0.12)",
+          DEFAULT: "#6366F1", // indigo — tech blue/purple brand
+          hover: "#4F46E5",
+          soft: "rgba(99,102,241,0.15)",
         },
         info: "#38BDF8",
         warn: "#FBBF24",

@@ -462,6 +462,99 @@ impl SshManager {
         Ok(())
     }
 
+    async fn open_conn(&self, p: &ConnectParams) -> anyhow::Result<Conn> {
+        let (handle, keepalive) = self.connect(p).await?;
+        let channel = handle.channel_open_session().await?;
+        channel.request_subsystem(true, "sftp").await?;
+        let sftp = russh_sftp::client::SftpSession::new(channel.into_stream()).await?;
+        Ok(Conn {
+            _handle: handle,
+            _keepalive: keepalive,
+            sftp,
+        })
+    }
+
+    /// Copy a file or a whole directory tree between endpoints (local = None),
+    /// streaming in chunks and emitting `transfer://progress/<id>` events.
+    pub async fn transfer_tree(
+        &self,
+        app: AppHandle,
+        id: String,
+        src: Option<ConnectParams>,
+        src_path: String,
+        dst: Option<ConnectParams>,
+        dst_path: String,
+        is_dir: bool,
+    ) -> anyhow::Result<()> {
+        let src_conn = match &src {
+            Some(p) => Some(self.open_conn(p).await?),
+            None => None,
+        };
+        let dst_conn = match &dst {
+            Some(p) => Some(self.open_conn(p).await?),
+            None => None,
+        };
+
+        // Trust an actual stat of the source over the caller's hint.
+        let is_dir = conn_is_dir(src_conn.as_ref(), &src_path)
+            .await
+            .unwrap_or(is_dir);
+
+        let mut files: Vec<(String, String, u64)> = Vec::new();
+        let mut dirs: Vec<String> = Vec::new();
+        if is_dir {
+            dirs.push(dst_path.clone());
+            enumerate(src_conn.as_ref(), &src_path, &dst_path, &mut files, &mut dirs).await?;
+        } else {
+            let size = conn_stat_size(src_conn.as_ref(), &src_path).await.unwrap_or(0);
+            files.push((src_path.clone(), dst_path.clone(), size));
+        }
+
+        for d in &dirs {
+            conn_mkdir_p(dst_conn.as_ref(), d).await;
+        }
+
+        let total_total: u64 = files.iter().map(|f| f.2).sum();
+        let file_count = files.len();
+        let mut total_done: u64 = 0;
+        let mut last_emit: u64 = 0;
+
+        for (i, (sf, df, size)) in files.iter().enumerate() {
+            let mut reader = conn_reader(src_conn.as_ref(), sf).await?;
+            let mut writer = conn_writer(dst_conn.as_ref(), df).await?;
+            let mut buf = vec![0u8; 64 * 1024];
+            let mut file_done: u64 = 0;
+            let name = df.rsplit(['/', '\\']).next().unwrap_or(df).to_string();
+            loop {
+                let n = reader.read(&mut buf).await?;
+                if n == 0 {
+                    break;
+                }
+                writer.write_all(&buf[..n]).await?;
+                file_done += n as u64;
+                total_done += n as u64;
+                if total_done - last_emit >= 128 * 1024 || file_done >= *size {
+                    last_emit = total_done;
+                    let _ = app.emit(
+                        &format!("transfer://progress/{id}"),
+                        TransferProgress {
+                            file_index: i,
+                            file_count,
+                            current_file: name.clone(),
+                            file_done,
+                            file_total: *size,
+                            total_done,
+                            total_total,
+                        },
+                    );
+                }
+            }
+            writer.flush().await?;
+        }
+        let _ = app.emit(&format!("transfer://done/{id}"), ());
+        Ok(())
+    }
+
     // ---- local port forwarding ----
 
     pub async fn start_local_forward(
@@ -661,6 +754,120 @@ async fn remove_dir_recursive(
         }
     }
     sftp.remove_dir(base.to_string()).await?;
+    Ok(())
+}
+
+struct Conn {
+    _handle: Handle<ClientHandler>,
+    _keepalive: Keepalive,
+    sftp: russh_sftp::client::SftpSession,
+}
+
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TransferProgress {
+    file_index: usize,
+    file_count: usize,
+    current_file: String,
+    file_done: u64,
+    file_total: u64,
+    total_done: u64,
+    total_total: u64,
+}
+
+async fn conn_list(conn: Option<&Conn>, path: &str) -> anyhow::Result<Vec<(String, bool, u64)>> {
+    let mut out = Vec::new();
+    match conn {
+        None => {
+            for e in std::fs::read_dir(path)?.flatten() {
+                let meta = e.metadata().ok();
+                out.push((
+                    e.file_name().to_string_lossy().to_string(),
+                    meta.as_ref().map(|m| m.is_dir()).unwrap_or(false),
+                    meta.as_ref().map(|m| m.len()).unwrap_or(0),
+                ));
+            }
+        }
+        Some(c) => {
+            for e in c.sftp.read_dir(path).await? {
+                let m = e.metadata();
+                out.push((e.file_name(), m.is_dir(), m.size.unwrap_or(0)));
+            }
+        }
+    }
+    Ok(out)
+}
+
+async fn conn_stat_size(conn: Option<&Conn>, path: &str) -> anyhow::Result<u64> {
+    match conn {
+        None => Ok(std::fs::metadata(path)?.len()),
+        Some(c) => Ok(c.sftp.metadata(path.to_string()).await?.size.unwrap_or(0)),
+    }
+}
+
+async fn conn_is_dir(conn: Option<&Conn>, path: &str) -> anyhow::Result<bool> {
+    match conn {
+        None => Ok(std::fs::metadata(path)?.is_dir()),
+        Some(c) => Ok(c.sftp.metadata(path.to_string()).await?.is_dir()),
+    }
+}
+
+async fn conn_mkdir_p(conn: Option<&Conn>, path: &str) {
+    match conn {
+        None => {
+            let _ = std::fs::create_dir_all(path);
+        }
+        Some(c) => {
+            let mut cur = String::new();
+            for p in path.split('/').filter(|s| !s.is_empty()) {
+                cur.push('/');
+                cur.push_str(p);
+                let _ = c.sftp.create_dir(cur.clone()).await;
+            }
+        }
+    }
+}
+
+async fn conn_reader(
+    conn: Option<&Conn>,
+    path: &str,
+) -> anyhow::Result<Box<dyn tokio::io::AsyncRead + Unpin + Send>> {
+    match conn {
+        None => Ok(Box::new(tokio::fs::File::open(path).await?)),
+        Some(c) => Ok(Box::new(c.sftp.open(path.to_string()).await?)),
+    }
+}
+
+async fn conn_writer(
+    conn: Option<&Conn>,
+    path: &str,
+) -> anyhow::Result<Box<dyn tokio::io::AsyncWrite + Unpin + Send>> {
+    match conn {
+        None => Ok(Box::new(tokio::fs::File::create(path).await?)),
+        Some(c) => Ok(Box::new(c.sftp.create(path.to_string()).await?)),
+    }
+}
+
+async fn enumerate(
+    conn: Option<&Conn>,
+    src_dir: &str,
+    dst_dir: &str,
+    files: &mut Vec<(String, String, u64)>,
+    dirs: &mut Vec<String>,
+) -> anyhow::Result<()> {
+    for (name, is_dir, size) in conn_list(conn, src_dir).await? {
+        if name == "." || name == ".." {
+            continue;
+        }
+        let s = format!("{}/{}", src_dir.trim_end_matches(['/', '\\']), name);
+        let d = format!("{}/{}", dst_dir.trim_end_matches(['/', '\\']), name);
+        if is_dir {
+            dirs.push(d.clone());
+            Box::pin(enumerate(conn, &s, &d, files, dirs)).await?;
+        } else {
+            files.push((s, d, size));
+        }
+    }
     Ok(())
 }
 

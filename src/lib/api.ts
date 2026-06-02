@@ -56,6 +56,15 @@ export const sftpTransfer = (
   dstHostId: string | null,
   dstPath: string,
 ) => invoke<number>("sftp_transfer", { srcHostId, srcPath, dstHostId, dstPath });
+export const transferStart = (
+  id: string,
+  srcHostId: string | null,
+  srcPath: string,
+  dstHostId: string | null,
+  dstPath: string,
+  isDir: boolean,
+) =>
+  invoke<void>("transfer_start", { id, srcHostId, srcPath, dstHostId, dstPath, isDir });
 export const fileReadB64 = (hostId: string | null, path: string) =>
   invoke<string>("file_read_b64", { hostId, path });
 export const fileRename = (hostId: string | null, from: string, to: string) =>

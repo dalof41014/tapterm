@@ -20,7 +20,9 @@ import {
   X,
 } from "lucide-react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { listen } from "@tauri-apps/api/event";
 import { ask } from "@tauri-apps/plugin-dialog";
+import { nanoid } from "nanoid";
 import {
   fileDelete,
   fileMkdir,
@@ -28,7 +30,7 @@ import {
   fileRename,
   localList,
   sftpList,
-  sftpTransfer,
+  transferStart,
 } from "../lib/api";
 import { useStore } from "../store/useStore";
 import type { Host, SftpEntry } from "../lib/types";
@@ -273,10 +275,10 @@ function Pane({
           return (
             <li
               key={entry.name}
-              draggable={!entry.isDir}
+              draggable
               onDragStart={(ev) => {
                 const names = pane.selected.has(entry.name)
-                  ? pane.selectedEntries().filter((e) => !e.isDir).map((e) => e.name)
+                  ? pane.selectedEntries().map((e) => e.name)
                   : [entry.name];
                 ev.dataTransfer.setData(DND_TYPE, JSON.stringify({ side, names }));
                 ev.dataTransfer.effectAllowed = "copy";
@@ -326,6 +328,15 @@ interface PreviewState {
   error: string | null;
 }
 
+interface Prog {
+  item: string;
+  itemIndex: number;
+  itemCount: number;
+  file: string;
+  filePct: number;
+  totalPct: number;
+}
+
 export function FileManager() {
   const hosts = useStore((s) => s.vault.hosts);
   const left = usePane();
@@ -336,6 +347,7 @@ export function FileManager() {
   const [preview, setPreview] = useState<PreviewState | null>(null);
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [dialog, setDialog] = useState<DialogState | null>(null);
+  const [progress, setProgress] = useState<Prog | null>(null);
 
   const leftRef = useRef(left);
   const rightRef = useRef(right);
@@ -346,25 +358,48 @@ export function FileManager() {
   const otherOf = (s: Side) => (s === "left" ? right : left);
 
   const transferMany = useCallback(async (from: PaneState, to: PaneState, names: string[]) => {
-    const files = names.filter((n) => {
-      const e = from.entries.find((x) => x.name === n);
-      return e && !e.isDir;
-    });
-    if (!files.length) return;
+    const items = names
+      .map((n) => from.entries.find((e) => e.name === n))
+      .filter((e): e is SftpEntry => !!e);
+    if (!items.length) return;
     setBusy(true);
     setMsg(null);
-    let done = 0;
+    setProgress(null);
     try {
-      for (const name of files) {
-        setMsg(`Copying ${++done}/${files.length}: ${name}`);
-        await sftpTransfer(from.hostId, joinPath(from.cwd, name), to.hostId, joinPath(to.cwd, name));
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        const tid = nanoid(8);
+        const un = await listen<any>(`transfer://progress/${tid}`, (e) => {
+          const p = e.payload;
+          setProgress({
+            item: item.name,
+            itemIndex: i,
+            itemCount: items.length,
+            file: p.currentFile,
+            filePct: p.fileTotal > 0 ? Math.round((p.fileDone / p.fileTotal) * 100) : 100,
+            totalPct: p.totalTotal > 0 ? Math.round((p.totalDone / p.totalTotal) * 100) : 100,
+          });
+        });
+        try {
+          await transferStart(
+            tid,
+            from.hostId,
+            joinPath(from.cwd, item.name),
+            to.hostId,
+            joinPath(to.cwd, item.name),
+            item.isDir,
+          );
+        } finally {
+          un();
+        }
       }
-      setMsg(`Copied ${files.length} file${files.length > 1 ? "s" : ""}`);
+      setMsg(`Copied ${items.length} item${items.length > 1 ? "s" : ""}`);
       await to.load(to.cwd);
     } catch (e) {
       setMsg("Transfer failed: " + String(e));
     } finally {
       setBusy(false);
+      setProgress(null);
     }
   }, []);
 
@@ -451,18 +486,35 @@ export function FileManager() {
           const pane = side === "left" ? leftRef.current : rightRef.current;
           (async () => {
             setBusy(true);
-            let done = 0;
+            setProgress(null);
             const paths = p.paths as string[];
             try {
-              for (const path of paths) {
-                setMsg(`Uploading ${++done}/${paths.length}: ${baseName(path)}`);
-                await sftpTransfer(null, path, pane.hostId, joinPath(pane.cwd, baseName(path)));
+              for (let i = 0; i < paths.length; i++) {
+                const path = paths[i];
+                const tid = nanoid(8);
+                const un = await listen<any>(`transfer://progress/${tid}`, (e) => {
+                  const pr = e.payload;
+                  setProgress({
+                    item: baseName(path),
+                    itemIndex: i,
+                    itemCount: paths.length,
+                    file: pr.currentFile,
+                    filePct: pr.fileTotal > 0 ? Math.round((pr.fileDone / pr.fileTotal) * 100) : 100,
+                    totalPct: pr.totalTotal > 0 ? Math.round((pr.totalDone / pr.totalTotal) * 100) : 100,
+                  });
+                });
+                try {
+                  await transferStart(tid, null, path, pane.hostId, joinPath(pane.cwd, baseName(path)), false);
+                } finally {
+                  un();
+                }
               }
-              setMsg(`Uploaded ${paths.length} file${paths.length > 1 ? "s" : ""}`);
+              setMsg(`Uploaded ${paths.length} item${paths.length > 1 ? "s" : ""}`);
             } catch (e) {
               setMsg("Upload failed: " + String(e));
             } finally {
               setBusy(false);
+              setProgress(null);
               await pane.load(pane.cwd);
             }
           })();
@@ -472,8 +524,8 @@ export function FileManager() {
     return () => unlisten?.();
   }, []);
 
-  const leftSel = left.selectedEntries().filter((e) => !e.isDir).map((e) => e.name);
-  const rightSel = right.selectedEntries().filter((e) => !e.isDir).map((e) => e.name);
+  const leftSel = left.selectedEntries().map((e) => e.name);
+  const rightSel = right.selectedEntries().map((e) => e.name);
 
   // ----- context menu items -----
   const menuItems = (m: MenuState) => {
@@ -489,7 +541,7 @@ export function FileManager() {
         icon: Copy,
         onClick: () => {
           const names = pane.selected.has(e.name)
-            ? pane.selectedEntries().filter((x) => !x.isDir).map((x) => x.name)
+            ? pane.selectedEntries().map((x) => x.name)
             : [e.name];
           transferMany(pane, other, names);
         },
@@ -529,9 +581,29 @@ export function FileManager() {
       <div className="flex h-11 shrink-0 items-center gap-2 border-b border-line bg-bg-raised px-4">
         <ArrowLeftRight size={16} className="text-accent" />
         <span className="text-sm font-semibold">File Transfer</span>
-        {busy && <RefreshCw size={13} className="animate-spin text-content-faint" />}
-        {msg && <span className="ml-2 truncate text-xs text-content-muted">{msg}</span>}
+        {busy && !progress && <RefreshCw size={13} className="animate-spin text-content-faint" />}
+        {msg && !progress && <span className="ml-2 truncate text-xs text-content-muted">{msg}</span>}
       </div>
+
+      {progress && (
+        <div className="shrink-0 border-b border-line bg-bg-raised px-4 py-2">
+          <div className="mb-1 flex items-center gap-2 text-[11px] text-content-muted">
+            <span className="truncate font-mono">{progress.file || progress.item}</span>
+            {progress.itemCount > 1 && (
+              <span className="ml-auto shrink-0">
+                item {progress.itemIndex + 1}/{progress.itemCount}
+              </span>
+            )}
+            <span className="shrink-0 tabular-nums text-accent">{progress.totalPct}%</span>
+          </div>
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-bg-inset">
+            <div
+              className="h-full rounded-full bg-accent transition-all duration-150"
+              style={{ width: `${progress.filePct}%` }}
+            />
+          </div>
+        </div>
+      )}
 
       <div className="flex min-h-0 flex-1">
         <Pane side="left" pane={left} hosts={hosts} dropActive={dropTarget === "left"} onInternalDrop={onInternalDrop} onPreview={openPreview} onContext={(s, e, x, y) => setMenu({ side: s, entry: e, x, y })} />
