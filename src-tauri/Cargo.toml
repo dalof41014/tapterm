@@ -1,6 +1,6 @@
 [package]
 name = "terminal-app"
-version = "0.1.0"
+version = "0.1.1"
 description = "Terminal — a modern SSH/SFTP client built with Tauri"
 authors = ["you"]
 edition = "2021"
