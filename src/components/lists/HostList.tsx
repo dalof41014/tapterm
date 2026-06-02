@@ -2,9 +2,11 @@ import { useState } from "react";
 import {
   ChevronDown,
   ChevronRight,
+  Copy,
   Folder,
   FolderOpen,
   FolderPlus,
+  LayoutGrid,
   Pencil,
   Plus,
   Server,
@@ -23,7 +25,9 @@ export function HostList() {
   const toggleGroup = useStore((s) => s.toggleGroup);
   const openHost = useStore((s) => s.openHost);
   const deleteHost = useStore((s) => s.deleteHost);
+  const duplicateHost = useStore((s) => s.duplicateHost);
   const deleteGroup = useStore((s) => s.deleteGroup);
+  const setMainView = useStore((s) => s.setMainView);
 
   const [editingHost, setEditingHost] = useState<Host | null>(null);
   const [creatingHost, setCreatingHost] = useState<{ groupId: string | null } | null>(null);
@@ -57,6 +61,9 @@ export function HostList() {
       <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
         <button className="btn-ghost p-1" title="Edit" onClick={() => setEditingHost(h)}>
           <Pencil size={13} />
+        </button>
+        <button className="btn-ghost p-1" title="Duplicate" onClick={() => duplicateHost(h.id)}>
+          <Copy size={13} />
         </button>
         <button className="btn-ghost p-1 hover:text-danger" title="Delete" onClick={() => deleteHost(h.id)}>
           <Trash2 size={13} />
@@ -142,6 +149,12 @@ export function HostList() {
 
   return (
     <div>
+      <button
+        className="btn-ghost mb-1.5 w-full justify-center py-1.5 text-xs"
+        onClick={() => setMainView("hosts")}
+      >
+        <LayoutGrid size={14} /> Manage all hosts
+      </button>
       <div className="mb-2 flex gap-1.5">
         <button className="btn-surface flex-1 justify-center py-1.5 text-xs" onClick={() => setCreatingHost({ groupId: null })}>
           <Plus size={14} /> Host

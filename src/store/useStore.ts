@@ -14,7 +14,7 @@ import {
 
 export type SidebarView = "hosts" | "keys" | "snippets" | "forwards" | "known";
 export type RightPanel = "none" | "sftp" | "snippets" | "forwards" | "themes";
-export type MainView = "terminals" | "files";
+export type MainView = "terminals" | "files" | "hosts";
 
 export interface Tab {
   id: string;
@@ -73,6 +73,7 @@ interface StoreState {
   toggleGroup: (id: string) => void;
   // host CRUD
   saveHost: (h: Host) => Promise<void>;
+  duplicateHost: (id: string) => Promise<void>;
   deleteHost: (id: string) => Promise<void>;
   // key CRUD
   saveKey: (k: SshKey) => Promise<void>;
@@ -212,6 +213,13 @@ export const useStore = create<StoreState>((set, get) => ({
 
   saveHost: async (h) => {
     set((s) => ({ vault: { ...s.vault, hosts: upsert(s.vault.hosts, h) } }));
+    await get().persist();
+  },
+  duplicateHost: async (id) => {
+    const h = get().vault.hosts.find((x) => x.id === id);
+    if (!h) return;
+    const copy: Host = { ...h, id: nanoid(10), label: `${h.label} (copy)`, tags: [...h.tags] };
+    set((s) => ({ vault: { ...s.vault, hosts: [...s.vault.hosts, copy] } }));
     await get().persist();
   },
   deleteHost: async (id) => {

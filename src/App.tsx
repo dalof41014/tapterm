@@ -5,6 +5,7 @@ import { VaultGate } from "./components/VaultGate";
 import { Sidebar } from "./components/Sidebar";
 import { Workspace } from "./components/Workspace";
 import { FileManager } from "./components/FileManager";
+import { HostsPage } from "./components/HostsPage";
 import { TitleBar } from "./components/TitleBar";
 import { UpdateToast } from "./components/UpdateToast";
 
@@ -56,7 +57,13 @@ export default function App() {
       ) : (
         <div className="flex min-h-0 flex-1">
           <Sidebar />
-          {mainView === "files" ? <FileManager /> : <Workspace />}
+          {mainView === "files" ? (
+            <FileManager />
+          ) : mainView === "hosts" ? (
+            <HostsPage />
+          ) : (
+            <Workspace />
+          )}
         </div>
       )}
       <UpdateToast />
