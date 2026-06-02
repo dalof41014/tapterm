@@ -4,6 +4,8 @@ import type { KnownHost, SftpListing, SyncStatus, VaultData, VaultStatus } from 
 // ---- vault ----
 export const vaultStatus = () => invoke<VaultStatus>("vault_status");
 export const vaultInit = (password: string) => invoke<void>("vault_init", { password });
+export const vaultInitNopass = () => invoke<void>("vault_init_nopass");
+export const vaultAutounlock = () => invoke<boolean>("vault_autounlock");
 export const vaultUnlock = (password: string) => invoke<void>("vault_unlock", { password });
 export const vaultLock = () => invoke<void>("vault_lock");
 export const vaultGet = () => invoke<VaultData>("vault_get");

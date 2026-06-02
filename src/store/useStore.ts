@@ -35,6 +35,8 @@ interface StoreState {
   collapsedGroups: Set<string>;
   gdriveConnected: boolean;
   setGdriveConnected: (v: boolean) => void;
+  noPassword: boolean;
+  setNoPassword: (v: boolean) => void;
   // tabs
   tabs: Tab[];
   activeTabId: string | null;
@@ -92,6 +94,8 @@ export const useStore = create<StoreState>((set, get) => ({
   collapsedGroups: new Set(),
   gdriveConnected: false,
   setGdriveConnected: (v) => set({ gdriveConnected: v }),
+  noPassword: false,
+  setNoPassword: (v) => set({ noPassword: v }),
   tabs: [],
   activeTabId: null,
 

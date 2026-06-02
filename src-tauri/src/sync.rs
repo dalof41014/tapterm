@@ -35,6 +35,9 @@ pub struct SyncConfig {
     pub folder_path: Option<String>,
     #[serde(default)]
     pub gdrive: Option<GDriveConfig>,
+    /// Vault was created without a user password (auto-unlocks on launch).
+    #[serde(default)]
+    pub no_password: bool,
 }
 
 fn default_mode() -> String {
@@ -47,8 +50,15 @@ impl Default for SyncConfig {
             mode: default_mode(),
             folder_path: None,
             gdrive: None,
+            no_password: false,
         }
     }
+}
+
+pub fn set_no_password(value: bool) -> anyhow::Result<()> {
+    let mut cfg = load();
+    cfg.no_password = value;
+    save(&cfg)
 }
 
 pub fn config_path() -> PathBuf {
@@ -104,6 +114,7 @@ pub struct SyncStatus {
     pub gdrive_connected: bool,
     pub gdrive_email: Option<String>,
     pub gdrive_has_credentials: bool,
+    pub no_password: bool,
 }
 
 pub fn status(cfg: &SyncConfig) -> SyncStatus {
@@ -118,5 +129,6 @@ pub fn status(cfg: &SyncConfig) -> SyncStatus {
             .as_ref()
             .map(|g| !g.client_id.is_empty())
             .unwrap_or(false),
+        no_password: cfg.no_password,
     }
 }

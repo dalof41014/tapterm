@@ -1,12 +1,26 @@
 import { useState } from "react";
-import { KeyRound, ShieldCheck, TerminalSquare } from "lucide-react";
+import { ArrowRight, KeyRound, ShieldCheck, TerminalSquare } from "lucide-react";
 import { useStore } from "../store/useStore";
-import { vaultInit, vaultUnlock } from "../lib/api";
+import { vaultInit, vaultInitNopass, vaultUnlock } from "../lib/api";
 
 export function VaultGate() {
   const status = useStore((s) => s.status);
   const refreshStatus = useStore((s) => s.refreshStatus);
+  const setNoPassword = useStore((s) => s.setNoPassword);
   const isNew = !status?.exists;
+
+  const skip = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await vaultInitNopass();
+      setNoPassword(true);
+      await refreshStatus();
+    } catch (err) {
+      setError(String(err));
+      setBusy(false);
+    }
+  };
 
   const [pw, setPw] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -96,6 +110,17 @@ export function VaultGate() {
             {busy ? "Working…" : isNew ? "Create Vault" : "Unlock"}
           </button>
         </form>
+
+        {isNew && (
+          <button
+            onClick={skip}
+            disabled={busy}
+            className="btn-ghost mt-3 w-full justify-center text-xs"
+          >
+            Skip — use without a master password
+            <ArrowRight size={14} />
+          </button>
+        )}
 
         <p className="mt-4 text-center text-[11px] text-content-faint">
           End-to-end encrypted · Argon2id key derivation · stored locally

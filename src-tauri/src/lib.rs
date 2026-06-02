@@ -36,9 +36,33 @@ fn vault_status(state: State<AppState>) -> VaultStatus {
     }
 }
 
+/// Built-in passphrase used when the user opts out of a master password. The
+/// vault is still encrypted at rest, but unlocks automatically on launch.
+const NO_PASSWORD_KEY: &str = "terminal::no-password::v1";
+
 #[tauri::command]
 fn vault_init(state: State<AppState>, password: String) -> Result<(), String> {
+    let _ = sync::set_no_password(false);
     map_err(state.vault.init(&password))
+}
+
+#[tauri::command]
+fn vault_init_nopass(state: State<AppState>) -> Result<(), String> {
+    map_err(state.vault.init(NO_PASSWORD_KEY))?;
+    map_err(sync::set_no_password(true))
+}
+
+/// If the vault was created without a password, unlock it silently. Returns
+/// whether the vault ended up unlocked.
+#[tauri::command]
+fn vault_autounlock(state: State<AppState>) -> bool {
+    if state.vault.is_unlocked() {
+        return true;
+    }
+    if sync::load().no_password && state.vault.exists() {
+        let _ = state.vault.unlock(NO_PASSWORD_KEY);
+    }
+    state.vault.is_unlocked()
 }
 
 #[tauri::command]
@@ -355,6 +379,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             vault_status,
             vault_init,
+            vault_init_nopass,
+            vault_autounlock,
             vault_unlock,
             vault_lock,
             vault_get,

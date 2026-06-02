@@ -7,6 +7,7 @@ import { SettingsModal } from "./modals/SettingsModal";
 
 export function TitleBar() {
   const status = useStore((s) => s.status);
+  const noPassword = useStore((s) => s.noPassword);
   const refreshStatus = useStore((s) => s.refreshStatus);
   const appWin = getCurrentWindow();
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -37,7 +38,7 @@ export function TitleBar() {
         >
           <Settings size={15} />
         </button>
-        {status?.unlocked && (
+        {status?.unlocked && !noPassword && (
           <button className="btn-ghost mr-1 px-2 py-1 text-xs" onClick={onLock} title="Lock vault">
             <Lock size={14} />
             Lock

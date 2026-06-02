@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useStore } from "./store/useStore";
-import { gdrivePull, syncStatus } from "./lib/api";
+import { gdrivePull, syncStatus, vaultAutounlock } from "./lib/api";
 import { VaultGate } from "./components/VaultGate";
 import { Sidebar } from "./components/Sidebar";
 import { Workspace } from "./components/Workspace";
@@ -11,6 +11,7 @@ export default function App() {
   const status = useStore((s) => s.status);
   const refreshStatus = useStore((s) => s.refreshStatus);
   const setGdriveConnected = useStore((s) => s.setGdriveConnected);
+  const setNoPassword = useStore((s) => s.setNoPassword);
   const [booted, setBooted] = useState(false);
 
   useEffect(() => {
@@ -18,9 +19,14 @@ export default function App() {
       try {
         const s = await syncStatus();
         setGdriveConnected(s.gdriveConnected);
+        setNoPassword(s.noPassword);
         // pull the latest encrypted vault from Drive before unlocking
         if (s.gdriveConnected) {
           await gdrivePull().catch(() => {});
+        }
+        // if the vault has no master password, unlock it silently
+        if (s.noPassword) {
+          await vaultAutounlock().catch(() => false);
         }
       } catch {
         /* ignore */
@@ -28,7 +34,7 @@ export default function App() {
       await refreshStatus();
       setBooted(true);
     })();
-  }, [refreshStatus, setGdriveConnected]);
+  }, [refreshStatus, setGdriveConnected, setNoPassword]);
 
   if (!booted) {
     return (

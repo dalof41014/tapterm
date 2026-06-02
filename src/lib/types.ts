@@ -88,6 +88,7 @@ export interface SyncStatus {
   gdriveConnected: boolean;
   gdriveEmail?: string | null;
   gdriveHasCredentials: boolean;
+  noPassword: boolean;
 }
 
 export const emptyVault = (): VaultData => ({
