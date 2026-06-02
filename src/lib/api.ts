@@ -58,6 +58,12 @@ export const sftpTransfer = (
 ) => invoke<number>("sftp_transfer", { srcHostId, srcPath, dstHostId, dstPath });
 export const fileReadB64 = (hostId: string | null, path: string) =>
   invoke<string>("file_read_b64", { hostId, path });
+export const fileRename = (hostId: string | null, from: string, to: string) =>
+  invoke<void>("file_rename", { hostId, from, to });
+export const fileMkdir = (hostId: string | null, path: string) =>
+  invoke<void>("file_mkdir", { hostId, path });
+export const fileDelete = (hostId: string | null, path: string, isDir: boolean) =>
+  invoke<void>("file_delete", { hostId, path, isDir });
 
 // ---- port forwarding ----
 export const forwardStart = (

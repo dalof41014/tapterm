@@ -464,6 +464,60 @@ async fn file_read_b64(
     Ok(B64.encode(&bytes))
 }
 
+#[tauri::command]
+async fn file_rename(
+    state: State<'_, AppState>,
+    host_id: Option<String>,
+    from: String,
+    to: String,
+) -> Result<(), String> {
+    match &host_id {
+        Some(h) => {
+            let p = params_for(&state, h, 80, 24)?;
+            map_err(state.ssh.sftp_rename(p, from, to).await)
+        }
+        None => tokio::fs::rename(&from, &to).await.map_err(|e| e.to_string()),
+    }
+}
+
+#[tauri::command]
+async fn file_mkdir(
+    state: State<'_, AppState>,
+    host_id: Option<String>,
+    path: String,
+) -> Result<(), String> {
+    match &host_id {
+        Some(h) => {
+            let p = params_for(&state, h, 80, 24)?;
+            map_err(state.ssh.sftp_mkdir(p, path).await)
+        }
+        None => tokio::fs::create_dir(&path).await.map_err(|e| e.to_string()),
+    }
+}
+
+#[tauri::command]
+async fn file_delete(
+    state: State<'_, AppState>,
+    host_id: Option<String>,
+    path: String,
+    is_dir: bool,
+) -> Result<(), String> {
+    match &host_id {
+        Some(h) => {
+            let p = params_for(&state, h, 80, 24)?;
+            map_err(state.ssh.sftp_delete(p, path, is_dir).await)
+        }
+        None => {
+            let r = if is_dir {
+                tokio::fs::remove_dir_all(&path).await
+            } else {
+                tokio::fs::remove_file(&path).await
+            };
+            r.map_err(|e| e.to_string())
+        }
+    }
+}
+
 // ---------- port forwarding ----------
 
 #[tauri::command]
@@ -562,6 +616,9 @@ pub fn run() {
             local_list,
             sftp_transfer,
             file_read_b64,
+            file_rename,
+            file_mkdir,
+            file_delete,
             forward_start,
             forward_stop,
         ])

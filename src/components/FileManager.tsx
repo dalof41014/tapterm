@@ -5,29 +5,39 @@ import {
   CheckSquare,
   ChevronLeft,
   ChevronRight,
+  Copy,
+  Eye,
+  EyeOff,
   File as FileIcon,
+  FolderPlus,
   Folder,
   HardDrive,
   Image as ImageIcon,
+  Pencil,
   RefreshCw,
   Server,
+  Trash2,
   X,
 } from "lucide-react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { fileReadB64, localList, sftpList, sftpTransfer } from "../lib/api";
+import { ask } from "@tauri-apps/plugin-dialog";
+import {
+  fileDelete,
+  fileMkdir,
+  fileReadB64,
+  fileRename,
+  localList,
+  sftpList,
+  sftpTransfer,
+} from "../lib/api";
 import { useStore } from "../store/useStore";
 import type { Host, SftpEntry } from "../lib/types";
 
 const DND_TYPE = "application/x-termfile";
 const IMG_EXT = ["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "ico", "avif"];
 
-function ext(name: string) {
-  const i = name.lastIndexOf(".");
-  return i >= 0 ? name.slice(i + 1).toLowerCase() : "";
-}
-function isImage(name: string) {
-  return IMG_EXT.includes(ext(name));
-}
+const ext = (n: string) => (n.lastIndexOf(".") >= 0 ? n.slice(n.lastIndexOf(".") + 1).toLowerCase() : "");
+const isImage = (n: string) => IMG_EXT.includes(ext(n));
 function mimeOf(name: string) {
   const e = ext(name);
   if (e === "svg") return "image/svg+xml";
@@ -35,9 +45,7 @@ function mimeOf(name: string) {
   if (e === "ico") return "image/x-icon";
   return `image/${e}`;
 }
-function sepOf(path: string) {
-  return path.includes("\\") && !path.includes("/") ? "\\" : "/";
-}
+const sepOf = (p: string) => (p.includes("\\") && !p.includes("/") ? "\\" : "/");
 function joinPath(cwd: string, name: string) {
   if (!cwd) return name;
   const s = sepOf(cwd);
@@ -49,9 +57,7 @@ function parentPath(cwd: string) {
   if (idx <= 0) return cwd.includes("\\") ? trimmed.slice(0, idx + 1) || trimmed : "/";
   return trimmed.slice(0, idx);
 }
-function baseName(path: string) {
-  return path.split(/[\\/]/).pop() || path;
-}
+const baseName = (p: string) => p.split(/[\\/]/).pop() || p;
 function humanSize(n: number) {
   if (n < 1024) return `${n} B`;
   const u = ["KB", "MB", "GB", "TB"];
@@ -74,22 +80,27 @@ interface PaneState {
   loading: boolean;
   error: string | null;
   selected: Set<string>;
+  hideHidden: boolean;
+  toggleHidden: () => void;
   setEndpoint: (v: string) => void;
   handleClick: (index: number, ctrl: boolean, shift: boolean) => void;
   selectAll: () => void;
   clearSel: () => void;
-  selectedFiles: () => string[];
+  selectedEntries: () => SftpEntry[];
   load: (path: string) => Promise<void>;
 }
 
 function usePane(): PaneState {
   const [endpoint, setEndpoint] = useState("local");
   const [cwd, setCwd] = useState("");
-  const [entries, setEntries] = useState<SftpEntry[]>([]);
+  const [raw, setRaw] = useState<SftpEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [hideHidden, setHideHidden] = useState(false);
   const lastIdx = useRef(-1);
+
+  const entries = hideHidden ? raw.filter((e) => !e.name.startsWith(".")) : raw;
 
   const load = useCallback(
     async (path: string) => {
@@ -99,7 +110,7 @@ function usePane(): PaneState {
       try {
         const res = endpoint === "local" ? await localList(path) : await sftpList(endpoint, path);
         setCwd(res.cwd);
-        setEntries(res.entries);
+        setRaw(res.entries);
       } catch (e) {
         setError(String(e));
       } finally {
@@ -122,6 +133,8 @@ function usePane(): PaneState {
     loading,
     error,
     selected,
+    hideHidden,
+    toggleHidden: () => setHideHidden((h) => !h),
     setEndpoint,
     handleClick: (index, ctrl, shift) => {
       const name = entries[index]?.name;
@@ -145,10 +158,22 @@ function usePane(): PaneState {
     },
     selectAll: () => setSelected(new Set(entries.map((e) => e.name))),
     clearSel: () => setSelected(new Set()),
-    selectedFiles: () =>
-      entries.filter((e) => selected.has(e.name) && !e.isDir).map((e) => e.name),
+    selectedEntries: () => entries.filter((e) => selected.has(e.name)),
     load,
   };
+}
+
+interface MenuState {
+  x: number;
+  y: number;
+  side: Side;
+  entry: SftpEntry | null;
+}
+interface DialogState {
+  mode: "rename" | "mkdir";
+  side: Side;
+  oldName?: string;
+  value: string;
 }
 
 function Pane({
@@ -158,6 +183,7 @@ function Pane({
   dropActive,
   onInternalDrop,
   onPreview,
+  onContext,
 }: {
   side: Side;
   pane: PaneState;
@@ -165,6 +191,7 @@ function Pane({
   dropActive: boolean;
   onInternalDrop: (target: Side, from: Side, names: string[]) => void;
   onPreview: (pane: PaneState, name: string) => void;
+  onContext: (side: Side, entry: SftpEntry | null, x: number, y: number) => void;
 }) {
   const selCount = pane.selected.size;
   return (
@@ -206,8 +233,8 @@ function Pane({
             </option>
           ))}
         </select>
-        <button className="btn-ghost ml-auto p-1.5" title="Select all" onClick={pane.selectAll}>
-          <CheckSquare size={14} />
+        <button className="btn-ghost ml-auto p-1.5" title="New folder" onClick={(e) => onContext(side, null, e.clientX, e.clientY)}>
+          <FolderPlus size={14} />
         </button>
         <button className="btn-ghost p-1.5" title="Refresh" onClick={() => pane.load(pane.cwd)}>
           <RefreshCw size={14} className={pane.loading ? "animate-spin" : ""} />
@@ -230,7 +257,16 @@ function Pane({
         </div>
       )}
 
-      <ul className="min-h-0 flex-1 overflow-y-auto p-1.5" onClick={(e) => e.target === e.currentTarget && pane.clearSel()}>
+      <ul
+        className="min-h-0 flex-1 overflow-y-auto p-1.5"
+        onClick={(e) => e.target === e.currentTarget && pane.clearSel()}
+        onContextMenu={(e) => {
+          if (e.target === e.currentTarget) {
+            e.preventDefault();
+            onContext(side, null, e.clientX, e.clientY);
+          }
+        }}
+      >
         {pane.entries.map((entry, index) => {
           const active = pane.selected.has(entry.name);
           const img = isImage(entry.name);
@@ -239,7 +275,9 @@ function Pane({
               key={entry.name}
               draggable={!entry.isDir}
               onDragStart={(ev) => {
-                const names = pane.selected.has(entry.name) ? pane.selectedFiles() : [entry.name];
+                const names = pane.selected.has(entry.name)
+                  ? pane.selectedEntries().filter((e) => !e.isDir).map((e) => e.name)
+                  : [entry.name];
                 ev.dataTransfer.setData(DND_TYPE, JSON.stringify({ side, names }));
                 ev.dataTransfer.effectAllowed = "copy";
               }}
@@ -247,6 +285,11 @@ function Pane({
               onDoubleClick={() => {
                 if (entry.isDir) pane.load(joinPath(pane.cwd, entry.name));
                 else if (img) onPreview(pane, entry.name);
+              }}
+              onContextMenu={(ev) => {
+                ev.preventDefault();
+                if (!pane.selected.has(entry.name)) pane.handleClick(index, false, false);
+                onContext(side, entry, ev.clientX, ev.clientY);
               }}
               className={`flex cursor-pointer select-none items-center gap-2.5 rounded-lg px-2.5 py-1.5 transition-colors duration-150 ${
                 active ? "bg-accent-soft text-content ring-1 ring-inset ring-accent/40" : "hover:bg-surface-hover"
@@ -291,48 +334,42 @@ export function FileManager() {
   const [msg, setMsg] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<Side | null>(null);
   const [preview, setPreview] = useState<PreviewState | null>(null);
+  const [menu, setMenu] = useState<MenuState | null>(null);
+  const [dialog, setDialog] = useState<DialogState | null>(null);
 
   const leftRef = useRef(left);
   const rightRef = useRef(right);
   leftRef.current = left;
   rightRef.current = right;
 
-  const transferMany = useCallback(
-    async (from: PaneState, to: PaneState, names: string[]) => {
-      const files = names.filter((n) => {
-        const e = from.entries.find((x) => x.name === n);
-        return e && !e.isDir;
-      });
-      if (!files.length) return;
-      setBusy(true);
-      setMsg(null);
-      let done = 0;
-      try {
-        for (const name of files) {
-          setMsg(`Copying ${++done}/${files.length}: ${name}`);
-          await sftpTransfer(
-            from.hostId,
-            joinPath(from.cwd, name),
-            to.hostId,
-            joinPath(to.cwd, name),
-          );
-        }
-        setMsg(`Copied ${files.length} file${files.length > 1 ? "s" : ""}`);
-        await to.load(to.cwd);
-      } catch (e) {
-        setMsg("Transfer failed: " + String(e));
-      } finally {
-        setBusy(false);
-      }
-    },
-    [],
-  );
+  const paneOf = (s: Side) => (s === "left" ? left : right);
+  const otherOf = (s: Side) => (s === "left" ? right : left);
 
-  const onInternalDrop = (target: Side, from: Side, names: string[]) => {
-    const fromPane = from === "left" ? left : right;
-    const toPane = target === "left" ? left : right;
-    transferMany(fromPane, toPane, names);
-  };
+  const transferMany = useCallback(async (from: PaneState, to: PaneState, names: string[]) => {
+    const files = names.filter((n) => {
+      const e = from.entries.find((x) => x.name === n);
+      return e && !e.isDir;
+    });
+    if (!files.length) return;
+    setBusy(true);
+    setMsg(null);
+    let done = 0;
+    try {
+      for (const name of files) {
+        setMsg(`Copying ${++done}/${files.length}: ${name}`);
+        await sftpTransfer(from.hostId, joinPath(from.cwd, name), to.hostId, joinPath(to.cwd, name));
+      }
+      setMsg(`Copied ${files.length} file${files.length > 1 ? "s" : ""}`);
+      await to.load(to.cwd);
+    } catch (e) {
+      setMsg("Transfer failed: " + String(e));
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  const onInternalDrop = (target: Side, from: Side, names: string[]) =>
+    transferMany(paneOf(from), paneOf(target), names);
 
   const openPreview = useCallback(async (pane: PaneState, name: string) => {
     setPreview({ name, url: null, loading: true, error: null });
@@ -343,6 +380,55 @@ export function FileManager() {
       setPreview({ name, url: null, loading: false, error: String(e) });
     }
   }, []);
+
+  const doDelete = async (pane: PaneState, entries: SftpEntry[]) => {
+    if (!entries.length) return;
+    const ok = await ask(
+      `Delete ${entries.length} item${entries.length > 1 ? "s" : ""}? This cannot be undone.`,
+      { title: "Confirm delete", kind: "warning" },
+    );
+    if (!ok) return;
+    setBusy(true);
+    setMsg(null);
+    try {
+      for (const e of entries) {
+        setMsg(`Deleting ${e.name}`);
+        await fileDelete(pane.hostId, joinPath(pane.cwd, e.name), e.isDir);
+      }
+      setMsg(`Deleted ${entries.length} item${entries.length > 1 ? "s" : ""}`);
+      await pane.load(pane.cwd);
+    } catch (e) {
+      setMsg("Delete failed: " + String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submitDialog = async () => {
+    if (!dialog) return;
+    const pane = paneOf(dialog.side);
+    const name = dialog.value.trim();
+    if (!name) return;
+    setBusy(true);
+    setMsg(null);
+    try {
+      if (dialog.mode === "mkdir") {
+        await fileMkdir(pane.hostId, joinPath(pane.cwd, name));
+      } else if (dialog.oldName) {
+        await fileRename(
+          pane.hostId,
+          joinPath(pane.cwd, dialog.oldName),
+          joinPath(pane.cwd, name),
+        );
+      }
+      await pane.load(pane.cwd);
+    } catch (e) {
+      setMsg("Failed: " + String(e));
+    } finally {
+      setBusy(false);
+      setDialog(null);
+    }
+  };
 
   // OS file drop → upload to the pane under the cursor
   useEffect(() => {
@@ -386,8 +472,57 @@ export function FileManager() {
     return () => unlisten?.();
   }, []);
 
-  const leftSel = left.selectedFiles();
-  const rightSel = right.selectedFiles();
+  const leftSel = left.selectedEntries().filter((e) => !e.isDir).map((e) => e.name);
+  const rightSel = right.selectedEntries().filter((e) => !e.isDir).map((e) => e.name);
+
+  // ----- context menu items -----
+  const menuItems = (m: MenuState) => {
+    const pane = paneOf(m.side);
+    const other = otherOf(m.side);
+    const items: { label: string; icon: any; onClick: () => void; danger?: boolean; disabled?: boolean }[] = [];
+    if (m.entry) {
+      const e = m.entry;
+      if (!e.isDir && isImage(e.name))
+        items.push({ label: "Open preview", icon: Eye, onClick: () => openPreview(pane, e.name) });
+      items.push({
+        label: `Copy to ${other.endpoint === "local" ? "This PC" : "other host"}`,
+        icon: Copy,
+        onClick: () => {
+          const names = pane.selected.has(e.name)
+            ? pane.selectedEntries().filter((x) => !x.isDir).map((x) => x.name)
+            : [e.name];
+          transferMany(pane, other, names);
+        },
+      });
+      items.push({
+        label: "Rename",
+        icon: Pencil,
+        onClick: () => setDialog({ mode: "rename", side: m.side, oldName: e.name, value: e.name }),
+      });
+      items.push({
+        label: "Delete",
+        icon: Trash2,
+        danger: true,
+        onClick: () => {
+          const sel = pane.selectedEntries();
+          doDelete(pane, sel.length && pane.selected.has(e.name) ? sel : [e]);
+        },
+      });
+    }
+    items.push({ label: "Refresh", icon: RefreshCw, onClick: () => pane.load(pane.cwd) });
+    items.push({
+      label: "New folder",
+      icon: FolderPlus,
+      onClick: () => setDialog({ mode: "mkdir", side: m.side, value: "New folder" }),
+    });
+    items.push({
+      label: pane.hideHidden ? "Show hidden files" : "Hide hidden files",
+      icon: pane.hideHidden ? Eye : EyeOff,
+      onClick: pane.toggleHidden,
+    });
+    items.push({ label: "Select all", icon: CheckSquare, onClick: pane.selectAll });
+    return items;
+  };
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg-inset">
@@ -399,54 +534,84 @@ export function FileManager() {
       </div>
 
       <div className="flex min-h-0 flex-1">
-        <Pane
-          side="left"
-          pane={left}
-          hosts={hosts}
-          dropActive={dropTarget === "left"}
-          onInternalDrop={onInternalDrop}
-          onPreview={openPreview}
-        />
+        <Pane side="left" pane={left} hosts={hosts} dropActive={dropTarget === "left"} onInternalDrop={onInternalDrop} onPreview={openPreview} onContext={(s, e, x, y) => setMenu({ side: s, entry: e, x, y })} />
 
         <div className="flex w-14 shrink-0 flex-col items-center justify-center gap-3 border-x border-line bg-bg-raised">
-          <button
-            className="btn-primary h-9 w-9 p-0 disabled:opacity-30"
-            title="Copy selected → right"
-            disabled={!leftSel.length || busy}
-            onClick={() => transferMany(left, right, leftSel)}
-          >
+          <button className="btn-primary h-9 w-9 p-0 disabled:opacity-30" title="Copy selected → right" disabled={!leftSel.length || busy} onClick={() => transferMany(left, right, leftSel)}>
             <ChevronRight size={18} />
           </button>
-          <button
-            className="btn-primary h-9 w-9 p-0 disabled:opacity-30"
-            title="Copy selected ← left"
-            disabled={!rightSel.length || busy}
-            onClick={() => transferMany(right, left, rightSel)}
-          >
+          <button className="btn-primary h-9 w-9 p-0 disabled:opacity-30" title="Copy selected ← left" disabled={!rightSel.length || busy} onClick={() => transferMany(right, left, rightSel)}>
             <ChevronLeft size={18} />
           </button>
         </div>
 
-        <Pane
-          side="right"
-          pane={right}
-          hosts={hosts}
-          dropActive={dropTarget === "right"}
-          onInternalDrop={onInternalDrop}
-          onPreview={openPreview}
-        />
+        <Pane side="right" pane={right} hosts={hosts} dropActive={dropTarget === "right"} onInternalDrop={onInternalDrop} onPreview={openPreview} onContext={(s, e, x, y) => setMenu({ side: s, entry: e, x, y })} />
       </div>
 
       <div className="flex h-7 shrink-0 items-center border-t border-line bg-bg-raised px-4 text-[11px] text-content-faint">
-        Click to select · Ctrl/Shift-click for multiple · drag between panes or onto a pane to copy ·
+        Click to select · Ctrl/Shift-click for multiple · right-click for actions · drag to copy ·
         double-click an image to preview.
       </div>
 
+      {/* context menu */}
+      {menu && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setMenu(null)} onContextMenu={(e) => { e.preventDefault(); setMenu(null); }} />
+          <div
+            className="fixed z-50 w-52 overflow-hidden rounded-xl border border-line-strong bg-bg-raised py-1 shadow-2xl animate-fade-in"
+            style={{ left: Math.min(menu.x, window.innerWidth - 220), top: Math.min(menu.y, window.innerHeight - 320) }}
+          >
+            {menuItems(menu).map((it, i) => (
+              <button
+                key={i}
+                onClick={() => {
+                  setMenu(null);
+                  it.onClick();
+                }}
+                className={`flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm transition-colors duration-150 hover:bg-surface-hover ${
+                  it.danger ? "text-danger hover:bg-danger/10" : "text-content"
+                }`}
+              >
+                <it.icon size={15} className="shrink-0" />
+                {it.label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+
+      {/* rename / new folder dialog */}
+      {dialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 animate-fade-in" onClick={() => setDialog(null)}>
+          <div className="card w-full max-w-sm p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <h3 className="mb-3 text-sm font-semibold text-content">
+              {dialog.mode === "mkdir" ? "New folder" : `Rename "${dialog.oldName}"`}
+            </h3>
+            <input
+              autoFocus
+              className="input"
+              value={dialog.value}
+              onChange={(e) => setDialog({ ...dialog, value: e.target.value })}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") submitDialog();
+                if (e.key === "Escape") setDialog(null);
+              }}
+            />
+            <div className="mt-4 flex justify-end gap-2">
+              <button className="btn-ghost px-3 py-1.5 text-xs" onClick={() => setDialog(null)}>
+                Cancel
+              </button>
+              <button className="btn-primary px-3 py-1.5 text-xs" onClick={submitDialog} disabled={!dialog.value.trim()}>
+                {dialog.mode === "mkdir" ? "Create" : "Rename"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* image preview */}
       {preview && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-8 animate-fade-in"
-          onClick={() => setPreview(null)}
-        >
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-8 animate-fade-in" onClick={() => setPreview(null)}>
           <div className="flex max-h-full max-w-4xl flex-col" onClick={(e) => e.stopPropagation()}>
             <div className="mb-2 flex items-center gap-2">
               <ImageIcon size={15} className="text-accent" />
@@ -461,12 +626,8 @@ export function FileManager() {
                   <RefreshCw size={16} className="animate-spin" /> Loading…
                 </div>
               )}
-              {preview.error && (
-                <div className="px-10 py-16 text-sm text-danger">{preview.error}</div>
-              )}
-              {preview.url && (
-                <img src={preview.url} alt={preview.name} className="max-h-[70vh] max-w-full object-contain" />
-              )}
+              {preview.error && <div className="px-10 py-16 text-sm text-danger">{preview.error}</div>}
+              {preview.url && <img src={preview.url} alt={preview.name} className="max-h-[70vh] max-w-full object-contain" />}
             </div>
           </div>
         </div>

@@ -416,6 +416,52 @@ impl SshManager {
         Ok(bytes.len() as u64)
     }
 
+    async fn open_sftp(
+        &self,
+        params: &ConnectParams,
+    ) -> anyhow::Result<(Handle<ClientHandler>, Keepalive, russh_sftp::client::SftpSession)> {
+        let (handle, keepalive) = self.connect(params).await?;
+        let channel = handle.channel_open_session().await?;
+        channel.request_subsystem(true, "sftp").await?;
+        let sftp = russh_sftp::client::SftpSession::new(channel.into_stream()).await?;
+        Ok((handle, keepalive, sftp))
+    }
+
+    pub async fn sftp_rename(
+        &self,
+        params: ConnectParams,
+        from: String,
+        to: String,
+    ) -> anyhow::Result<()> {
+        let (handle, _k, sftp) = self.open_sftp(&params).await?;
+        sftp.rename(from, to).await?;
+        let _ = handle.disconnect(Disconnect::ByApplication, "", "en").await;
+        Ok(())
+    }
+
+    pub async fn sftp_mkdir(&self, params: ConnectParams, path: String) -> anyhow::Result<()> {
+        let (handle, _k, sftp) = self.open_sftp(&params).await?;
+        sftp.create_dir(path).await?;
+        let _ = handle.disconnect(Disconnect::ByApplication, "", "en").await;
+        Ok(())
+    }
+
+    pub async fn sftp_delete(
+        &self,
+        params: ConnectParams,
+        path: String,
+        is_dir: bool,
+    ) -> anyhow::Result<()> {
+        let (handle, _k, sftp) = self.open_sftp(&params).await?;
+        if is_dir {
+            remove_dir_recursive(&sftp, &path).await?;
+        } else {
+            sftp.remove_file(path).await?;
+        }
+        let _ = handle.disconnect(Disconnect::ByApplication, "", "en").await;
+        Ok(())
+    }
+
     // ---- local port forwarding ----
 
     pub async fn start_local_forward(
@@ -594,6 +640,27 @@ async fn handle_socks(
                 .await?;
         }
     }
+    Ok(())
+}
+
+async fn remove_dir_recursive(
+    sftp: &russh_sftp::client::SftpSession,
+    path: &str,
+) -> anyhow::Result<()> {
+    let base = path.trim_end_matches('/');
+    for entry in sftp.read_dir(path).await? {
+        let name = entry.file_name();
+        if name == "." || name == ".." {
+            continue;
+        }
+        let child = format!("{base}/{name}");
+        if entry.metadata().is_dir() {
+            Box::pin(remove_dir_recursive(sftp, &child)).await?;
+        } else {
+            sftp.remove_file(child).await?;
+        }
+    }
+    sftp.remove_dir(base.to_string()).await?;
     Ok(())
 }
 
