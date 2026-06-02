@@ -1,9 +1,8 @@
-import { useState } from "react";
-import { Check, FolderTree, Palette, Plus, Server, X } from "lucide-react";
+import { FolderTree, Palette, Plus, Server, X } from "lucide-react";
 import { useStore } from "../store/useStore";
 import { TerminalView } from "./TerminalView";
 import { SftpPanel } from "./panels/SftpPanel";
-import { THEMES } from "../lib/themes";
+import { ThemePanel } from "./panels/ThemePanel";
 
 export function Workspace() {
   const tabs = useStore((s) => s.tabs);
@@ -13,9 +12,6 @@ export function Workspace() {
   const rightPanel = useStore((s) => s.rightPanel);
   const setRightPanel = useStore((s) => s.setRightPanel);
   const hosts = useStore((s) => s.vault.hosts);
-  const themeId = useStore((s) => s.terminalThemeId);
-  const setTerminalTheme = useStore((s) => s.setTerminalTheme);
-  const [themeOpen, setThemeOpen] = useState(false);
 
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? null;
 
@@ -62,47 +58,15 @@ export function Workspace() {
           })}
         </div>
 
-        <div className="relative ml-2">
-          <button
-            className="btn-ghost px-2 py-1.5 text-xs"
-            onClick={() => setThemeOpen((o) => !o)}
-            title="Terminal theme"
-          >
-            <Palette size={15} />
-          </button>
-          {themeOpen && (
-            <>
-              <div className="fixed inset-0 z-40" onClick={() => setThemeOpen(false)} />
-              <div className="absolute right-0 top-full z-50 mt-1 w-52 overflow-hidden rounded-xl border border-line-strong bg-bg-raised py-1 shadow-2xl animate-fade-in">
-                <div className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-content-faint">
-                  Terminal theme
-                </div>
-                {THEMES.map((t) => (
-                  <button
-                    key={t.id}
-                    onClick={() => {
-                      setTerminalTheme(t.id);
-                      setThemeOpen(false);
-                    }}
-                    className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-sm text-content transition-colors duration-150 hover:bg-surface-hover"
-                  >
-                    <span
-                      className="h-4 w-4 shrink-0 rounded border border-line-strong"
-                      style={{ background: t.theme.background }}
-                    >
-                      <span
-                        className="block h-full w-full scale-50 rounded-sm"
-                        style={{ background: t.theme.green }}
-                      />
-                    </span>
-                    <span className="min-w-0 flex-1 truncate">{t.name}</span>
-                    {themeId === t.id && <Check size={14} className="shrink-0 text-accent" />}
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
-        </div>
+        <button
+          className={`btn-ghost ml-2 px-2 py-1.5 text-xs ${
+            rightPanel === "themes" ? "bg-surface text-content" : ""
+          }`}
+          onClick={() => setRightPanel("themes")}
+          title="Terminal themes"
+        >
+          <Palette size={15} />
+        </button>
 
         {activeTab && (
           <button
@@ -139,6 +103,11 @@ export function Workspace() {
         {activeTab && rightPanel === "sftp" && (
           <div className="w-[380px] shrink-0 border-l border-line bg-bg">
             <SftpPanel hostId={activeTab.hostId} />
+          </div>
+        )}
+        {rightPanel === "themes" && (
+          <div className="w-[320px] shrink-0 border-l border-line bg-bg">
+            <ThemePanel />
           </div>
         )}
       </div>

@@ -3,6 +3,7 @@ import {
   Cloud,
   CloudUpload,
   CloudDownload,
+  Download,
   FolderSync,
   HardDrive,
   Link2,
@@ -12,6 +13,9 @@ import {
   Unlock,
 } from "lucide-react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { getVersion } from "@tauri-apps/api/app";
+import type { Update } from "@tauri-apps/plugin-updater";
+import { checkForUpdate, downloadAndApply } from "../../lib/updater";
 import { Modal } from "../ui/Modal";
 import { PasswordInput } from "../ui/PasswordInput";
 import {
@@ -46,6 +50,14 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const [newPw, setNewPw] = useState("");
   const [showPwInput, setShowPwInput] = useState(false);
 
+  // updates
+  const [version, setVersion] = useState("");
+  const [upState, setUpState] = useState<"idle" | "checking" | "none" | "available" | "installing">(
+    "idle",
+  );
+  const [upObj, setUpObj] = useState<Update | null>(null);
+  const [upPct, setUpPct] = useState<number | null>(null);
+
   const load = useCallback(async () => {
     const s = await syncStatus();
     setSync(s);
@@ -56,7 +68,32 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
 
   useEffect(() => {
     load();
+    getVersion().then(setVersion).catch(() => {});
   }, [load]);
+
+  const checkUpdate = async () => {
+    setUpState("checking");
+    const u = await checkForUpdate();
+    if (u) {
+      setUpObj(u);
+      setUpState("available");
+    } else {
+      setUpState("none");
+    }
+  };
+
+  const installUpdate = async () => {
+    if (!upObj) return;
+    setUpState("installing");
+    try {
+      await downloadAndApply(upObj, (p) => {
+        if (p.total) setUpPct(Math.round((p.downloaded / p.total) * 100));
+      });
+    } catch (e) {
+      setError("Update failed: " + String(e));
+      setUpState("available");
+    }
+  };
 
   const run = async (key: string, fn: () => Promise<unknown>, refresh = true) => {
     setBusy(key);
@@ -282,6 +319,46 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
               Remove master password (auto-unlock)
             </button>
           </>
+        )}
+      </section>
+
+      <section className="mt-6 border-t border-line pt-5">
+        <h3 className="mb-1 flex items-center gap-2 text-sm font-semibold text-content">
+          <Download size={16} className="text-accent" /> Updates
+        </h3>
+        <p className="mb-3 text-xs text-content-muted">
+          Tapterm {version && <span className="font-mono">v{version}</span>}
+        </p>
+
+        {upState === "available" ? (
+          <div>
+            <div className="chip mb-2 bg-accent-soft text-accent">
+              v{upObj?.version} available
+            </div>
+            {upObj?.body && (
+              <p className="mb-2 line-clamp-3 text-xs text-content-muted">{upObj.body.trim()}</p>
+            )}
+            <button className="btn-primary px-3 py-1.5 text-xs" onClick={installUpdate}>
+              <Download size={13} /> Install & restart
+            </button>
+          </div>
+        ) : upState === "installing" ? (
+          <div className="flex items-center gap-2 text-xs text-content-muted">
+            <RefreshCw size={13} className="animate-spin" />
+            {upPct !== null ? `Downloading ${upPct}%…` : "Installing…"}
+          </div>
+        ) : (
+          <div className="flex items-center gap-3">
+            <button className="btn-surface px-3 py-1.5 text-xs" onClick={checkUpdate} disabled={upState === "checking"}>
+              {upState === "checking" ? (
+                <RefreshCw size={13} className="animate-spin" />
+              ) : (
+                <RefreshCw size={13} />
+              )}
+              Check for updates
+            </button>
+            {upState === "none" && <span className="text-xs text-content-faint">You're up to date.</span>}
+          </div>
         )}
       </section>
     </Modal>

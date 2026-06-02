@@ -13,7 +13,7 @@ import {
 } from "../lib/types";
 
 export type SidebarView = "hosts" | "keys" | "snippets" | "forwards" | "known";
-export type RightPanel = "none" | "sftp" | "snippets" | "forwards";
+export type RightPanel = "none" | "sftp" | "snippets" | "forwards" | "themes";
 export type MainView = "terminals" | "files";
 
 export interface Tab {
