@@ -21,6 +21,7 @@ export interface Host {
   color?: string | null;
   tags: string[];
   jumpHostId?: string | null;
+  font?: string | null;
 }
 
 export interface SshKey {

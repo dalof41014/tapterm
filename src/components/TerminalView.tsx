@@ -17,6 +17,7 @@ import {
 } from "../lib/api";
 import { useStore, type Tab } from "../store/useStore";
 import { themeById } from "../lib/themes";
+import { fontFamilyCss } from "../lib/fonts";
 import { HostModal } from "./modals/HostModal";
 
 const SEARCH_OPTS = {
@@ -32,11 +33,13 @@ export function TerminalView({ tab }: { tab: Tab }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<SearchAddon | null>(null);
   const termRef = useRef<Terminal | null>(null);
+  const fitRef = useRef<FitAddon | null>(null);
   const setTabStatus = useStore((s) => s.setTabStatus);
   const host = useStore((s) => s.vault.hosts.find((h) => h.id === tab.hostId));
   const closeTab = useStore((s) => s.closeTab);
   const openHost = useStore((s) => s.openHost);
   const themeId = useStore((s) => s.terminalThemeId);
+  const fontId = useStore((s) => s.terminalFontId);
 
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -47,7 +50,7 @@ export function TerminalView({ tab }: { tab: Tab }) {
     if (!el) return;
 
     const term = new Terminal({
-      fontFamily: "JetBrains Mono, ui-monospace, monospace",
+      fontFamily: fontFamilyCss(host?.font || fontId),
       fontSize: 13,
       lineHeight: 1.3,
       cursorBlink: true,
@@ -64,6 +67,7 @@ export function TerminalView({ tab }: { tab: Tab }) {
     fit.fit();
     termRef.current = term;
     searchRef.current = searchAddon;
+    fitRef.current = fit;
 
     // Keyboard shortcuts: copy/paste and in-terminal search.
     term.attachCustomKeyEventHandler((e) => {
@@ -165,6 +169,20 @@ export function TerminalView({ tab }: { tab: Tab }) {
   useEffect(() => {
     if (termRef.current) termRef.current.options.theme = themeById(themeId);
   }, [themeId]);
+
+  // apply font changes live (re-fit since cell size changes)
+  useEffect(() => {
+    const term = termRef.current;
+    if (!term) return;
+    term.options.fontFamily = fontFamilyCss(host?.font || fontId);
+    try {
+      fitRef.current?.fit();
+      (tab.kind === "local" ? localResize : sshResize)(tab.id, term.cols, term.rows).catch(() => {});
+    } catch {
+      /* noop */
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fontId, host?.font]);
 
   const findNext = (q = query) => q && searchRef.current?.findNext(q, SEARCH_OPTS);
   const findPrev = (q = query) => q && searchRef.current?.findPrevious(q, SEARCH_OPTS);

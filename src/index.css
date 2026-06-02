@@ -7,6 +7,15 @@
   color-scheme: dark;
 }
 
+/* Bundled Nerd Font (offline, with powerline/icon glyphs) */
+@font-face {
+  font-family: "CascadiaCodeNF";
+  src: url("/fonts/CascadiaCodeNF.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
 * {
   box-sizing: border-box;
 }

@@ -115,7 +115,7 @@ export function Workspace() {
           <Palette size={15} />
         </button>
 
-        {activeTab && (
+        {activeTab && activeTab.kind === "ssh" && (
           <button
             className={`btn-ghost ml-1 px-2 py-1.5 text-xs ${
               rightPanel === "sftp" ? "bg-surface text-content" : ""
@@ -147,7 +147,7 @@ export function Workspace() {
           )}
         </div>
 
-        {activeTab && rightPanel === "sftp" && (
+        {activeTab && activeTab.kind === "ssh" && rightPanel === "sftp" && (
           <div className="w-[380px] shrink-0 border-l border-line bg-bg">
             <SftpPanel hostId={activeTab.hostId} />
           </div>

@@ -3,6 +3,7 @@ import { nanoid } from "nanoid";
 import { Modal, Field } from "../ui/Modal";
 import { PasswordInput } from "../ui/PasswordInput";
 import { useStore } from "../../store/useStore";
+import { FONTS } from "../../lib/fonts";
 import type { AuthMethod, Host } from "../../lib/types";
 
 const COLORS = ["#22C55E", "#38BDF8", "#FBBF24", "#F43F5E", "#A78BFA", "#F472B6"];
@@ -33,6 +34,7 @@ export function HostModal({
   const [tags, setTags] = useState((host?.tags ?? []).join(", "));
   const [groupId, setGroupId] = useState(host?.groupId ?? defaultGroupId ?? "");
   const [jumpHostId, setJumpHostId] = useState(host?.jumpHostId ?? "");
+  const [font, setFont] = useState(host?.font ?? "");
   const hosts = useStore((s) => s.vault.hosts);
 
   const save = async () => {
@@ -53,6 +55,7 @@ export function HostModal({
       os: host?.os ?? null,
       tags: tags.split(",").map((t) => t.trim()).filter(Boolean),
       jumpHostId: jumpHostId || null,
+      font: font || null,
     };
     try {
       await saveHost(next);
@@ -128,6 +131,17 @@ export function HostModal({
                 {h.label} ({h.username}@{h.address})
               </option>
             ))}
+        </select>
+      </Field>
+
+      <Field label="Terminal font" hint="Overrides the default font for this host only.">
+        <select className="input" value={font} onChange={(e) => setFont(e.target.value)}>
+          <option value="">— Use default —</option>
+          {FONTS.map((f) => (
+            <option key={f.id} value={f.id} style={{ fontFamily: f.family }}>
+              {f.name}
+            </option>
+          ))}
         </select>
       </Field>
 

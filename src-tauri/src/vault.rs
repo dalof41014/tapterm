@@ -51,6 +51,9 @@ pub struct Host {
     /// Optional jump (bastion) host id to tunnel this connection through.
     #[serde(default)]
     pub jump_host_id: Option<String>,
+    /// Optional terminal font id override for this host.
+    #[serde(default)]
+    pub font: Option<String>,
 }
 
 fn default_port() -> u16 {

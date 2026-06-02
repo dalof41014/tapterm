@@ -45,6 +45,8 @@ interface StoreState {
   setNoPassword: (v: boolean) => void;
   terminalThemeId: string;
   setTerminalTheme: (id: string) => void;
+  terminalFontId: string;
+  setTerminalFont: (id: string) => void;
   settingsOpen: boolean;
   setSettingsOpen: (v: boolean) => void;
   // tabs
@@ -126,6 +128,16 @@ export const useStore = create<StoreState>((set, get) => ({
       /* ignore */
     }
     set({ terminalThemeId: id });
+  },
+  terminalFontId:
+    (typeof localStorage !== "undefined" && localStorage.getItem("term-font")) || "jetbrains",
+  setTerminalFont: (id) => {
+    try {
+      localStorage.setItem("term-font", id);
+    } catch {
+      /* ignore */
+    }
+    set({ terminalFontId: id });
   },
   settingsOpen: false,
   setSettingsOpen: (v) => set({ settingsOpen: v }),

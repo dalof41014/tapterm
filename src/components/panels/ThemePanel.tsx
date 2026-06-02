@@ -1,6 +1,7 @@
-import { Check, Palette } from "lucide-react";
+import { Check, Palette, Type } from "lucide-react";
 import { useStore } from "../../store/useStore";
 import { THEMES } from "../../lib/themes";
+import { FONTS } from "../../lib/fonts";
 import type { ITheme } from "@xterm/xterm";
 
 function Preview({ t }: { t: ITheme }) {
@@ -34,13 +35,38 @@ function Preview({ t }: { t: ITheme }) {
 export function ThemePanel() {
   const themeId = useStore((s) => s.terminalThemeId);
   const setTerminalTheme = useStore((s) => s.setTerminalTheme);
+  const fontId = useStore((s) => s.terminalFontId);
+  const setTerminalFont = useStore((s) => s.setTerminalFont);
 
   return (
     <div className="flex h-full flex-col">
       <div className="flex h-12 items-center gap-2 border-b border-line px-4">
         <Palette size={16} className="text-accent" />
-        <span className="text-sm font-semibold">Themes</span>
+        <span className="text-sm font-semibold">Appearance</span>
       </div>
+
+      <div className="border-b border-line p-3">
+        <label className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-content-faint">
+          <Type size={12} /> Font (default)
+        </label>
+        <select
+          className="input py-1.5 text-xs"
+          value={fontId}
+          onChange={(e) => setTerminalFont(e.target.value)}
+          style={{ fontFamily: FONTS.find((f) => f.id === fontId)?.family }}
+        >
+          {FONTS.map((f) => (
+            <option key={f.id} value={f.id} style={{ fontFamily: f.family }}>
+              {f.name}
+            </option>
+          ))}
+        </select>
+        <p className="mt-2 rounded bg-bg-inset px-2 py-1.5 text-[13px] text-content-muted" style={{ fontFamily: FONTS.find((f) => f.id === fontId)?.family }}>
+          {`const x = () => { return 0 == 1; }; // 0O1lI`}
+        </p>
+      </div>
+
+      <div className="px-3 pt-2 text-[10px] font-semibold uppercase tracking-wide text-content-faint">Theme</div>
       <div className="min-h-0 flex-1 overflow-y-auto p-2">
         {THEMES.map((t) => {
           const active = themeId === t.id;
