@@ -64,14 +64,14 @@ export const AI_TOOLS: AiTool[] = [
   },
   {
     id: "kiro",
-    name: "Kiro",
-    command: "kiro",
+    name: "Kiro CLI",
+    command: "kiro-cli",
     builtin: true,
     commands: [
       { label: "Help", command: "/help", hint: "List available commands" },
       { label: "Clear", command: "/clear", hint: "Clear the conversation" },
       { label: "Tools", command: "/tools", hint: "List available tools" },
-      { label: "Quit", command: "/quit", hint: "Exit Kiro" },
+      { label: "Quit", command: "/quit", hint: "Exit Kiro CLI" },
     ],
   },
 ];

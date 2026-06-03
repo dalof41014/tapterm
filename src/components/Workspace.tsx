@@ -1,5 +1,5 @@
 import { useState, type MouseEvent } from "react";
-import { Bot, Copy, FolderTree, Palette, Pencil, Plus, Search, Server, SquarePlus, TerminalSquare, X } from "lucide-react";
+import { Bot, Check, Copy, FolderTree, Palette, Pencil, Plus, Search, Server, SquarePlus, TerminalSquare, X } from "lucide-react";
 import { useStore } from "../store/useStore";
 import { whichAvailable } from "../lib/api";
 import { TerminalView } from "./TerminalView";
@@ -21,6 +21,9 @@ export function Workspace() {
   const [connQuery, setConnQuery] = useState("");
   const [aiMenu, setAiMenu] = useState<{ x: number; y: number } | null>(null);
   const [aiInstalled, setAiInstalled] = useState<string[] | null>(null);
+  const [aiTargetMode, setAiTargetMode] = useState<"local" | "remote">("local");
+  const [aiTargetHost, setAiTargetHost] = useState<string | null>(null);
+  const [aiHostQuery, setAiHostQuery] = useState("");
   const aiTools = useStore((s) => s.aiTools);
 
   const startRename = (id: string, current: string) => setEditing({ id, value: current });
@@ -56,16 +59,46 @@ export function Workspace() {
     setConnQuery("");
     setNewConn({ x: r.left, y: r.bottom + 4 });
   };
+  const sshHosts = hosts.filter((h) => h.protocol !== "telnet");
+  const aiHq = aiHostQuery.toLowerCase();
+  const aiHostList = aiHq
+    ? sshHosts.filter(
+        (h) =>
+          h.label.toLowerCase().includes(aiHq) ||
+          h.address.toLowerCase().includes(aiHq) ||
+          h.username.toLowerCase().includes(aiHq),
+      )
+    : sshHosts;
+
   const openAiMenu = (e: MouseEvent<HTMLButtonElement>) => {
     const r = e.currentTarget.getBoundingClientRect();
     setAiInstalled(null);
+    setAiHostQuery("");
+    // default target: the active remote session if any, otherwise local
+    if (activeTab && activeTab.kind === "ssh" && activeTab.hostId) {
+      setAiTargetMode("remote");
+      setAiTargetHost(activeTab.hostId);
+    } else {
+      setAiTargetMode("local");
+      setAiTargetHost(null);
+    }
     setAiMenu({ x: r.left, y: r.bottom + 4 });
     whichAvailable(aiTools.map((t) => t.command))
       .then(setAiInstalled)
       .catch(() => setAiInstalled([]));
   };
   const launchAi = (toolId: string, command: string, name: string) => {
-    openLocal({ command, title: name, aiTool: toolId });
+    if (aiTargetMode === "local") {
+      openLocal({ command, title: name, aiTool: toolId });
+    } else {
+      if (!aiTargetHost) return;
+      const h = hosts.find((x) => x.id === aiTargetHost);
+      openHost(aiTargetHost, {
+        command,
+        aiTool: toolId,
+        title: h ? `${name} · ${h.label}` : name,
+      });
+    }
     if (rightPanel !== "ai") setRightPanel("ai");
     setAiMenu(null);
   };
@@ -319,7 +352,7 @@ export function Workspace() {
         </>
       )}
 
-      {/* AI tool launcher: opens a tagged local terminal */}
+      {/* AI tool launcher: opens a tagged local OR remote (ssh) session */}
       {aiMenu && (
         <>
           <div
@@ -328,34 +361,120 @@ export function Workspace() {
             onContextMenu={(e) => { e.preventDefault(); setAiMenu(null); }}
           />
           <div
-            className="fixed z-50 w-64 overflow-hidden rounded-xl border border-line-strong bg-bg-raised py-1 shadow-2xl animate-fade-in"
-            style={{ left: Math.min(aiMenu.x, window.innerWidth - 270), top: Math.min(aiMenu.y, window.innerHeight - 80 - aiTools.length * 46) }}
+            className="fixed z-50 flex max-h-[72vh] w-72 flex-col overflow-hidden rounded-xl border border-line-strong bg-bg-raised shadow-2xl animate-fade-in"
+            style={{ left: Math.min(aiMenu.x, window.innerWidth - 300), top: Math.min(aiMenu.y, window.innerHeight - 120) }}
           >
-            <div className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-content-faint">
-              AI tools
-            </div>
-            {aiTools.map((t) => {
-              const installed = aiInstalled === null ? null : aiInstalled.includes(t.command);
-              return (
+            {/* target selector */}
+            <div className="border-b border-line p-2">
+              <div className="mb-2 px-1 text-[11px] font-semibold uppercase tracking-wide text-content-faint">
+                Run on
+              </div>
+              <div className="flex gap-1.5">
                 <button
-                  key={t.id}
-                  className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-content transition-colors duration-150 hover:bg-surface-hover"
-                  onClick={() => launchAi(t.id, t.command, t.name)}
+                  onClick={() => { setAiTargetMode("local"); }}
+                  className={`flex-1 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
+                    aiTargetMode === "local"
+                      ? "border-accent bg-accent-soft text-accent"
+                      : "border-line-strong text-content-muted hover:bg-surface-hover"
+                  }`}
                 >
-                  <Bot size={15} className="shrink-0 text-accent" />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate font-medium">{t.name}</span>
-                    <span className="block truncate font-mono text-[10px] text-content-faint">
-                      {t.command}{installed === false ? " · not on PATH" : ""}
-                    </span>
-                  </span>
-                  <span
-                    className={`h-2 w-2 shrink-0 rounded-full ${installed ? "bg-emerald-500" : "bg-content-faint/40"}`}
-                    title={installed === null ? "" : installed ? "Installed" : "Not found on PATH"}
-                  />
+                  Local
                 </button>
-              );
-            })}
+                <button
+                  onClick={() => { setAiTargetMode("remote"); }}
+                  className={`flex-1 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
+                    aiTargetMode === "remote"
+                      ? "border-accent bg-accent-soft text-accent"
+                      : "border-line-strong text-content-muted hover:bg-surface-hover"
+                  }`}
+                >
+                  Remote host
+                </button>
+              </div>
+
+              {aiTargetMode === "remote" && (
+                <div className="mt-2">
+                  <div className="relative">
+                    <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-content-faint" />
+                    <input
+                      autoFocus
+                      className="input py-1.5 pl-8 text-xs"
+                      placeholder="Search hosts…"
+                      value={aiHostQuery}
+                      onChange={(e) => setAiHostQuery(e.target.value)}
+                    />
+                  </div>
+                  <div className="mt-1.5 max-h-40 overflow-y-auto">
+                    {aiHostList.length === 0 ? (
+                      <p className="px-2 py-3 text-center text-xs text-content-faint">No SSH hosts.</p>
+                    ) : (
+                      aiHostList.map((h) => (
+                        <button
+                          key={h.id}
+                          onClick={() => setAiTargetHost(h.id)}
+                          className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors ${
+                            aiTargetHost === h.id ? "bg-accent-soft" : "hover:bg-surface-hover"
+                          }`}
+                        >
+                          <span
+                            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[10px] font-bold uppercase"
+                            style={{ background: (h.color ?? "#22C55E") + "22", color: h.color ?? "#22C55E" }}
+                          >
+                            {h.label.slice(0, 2)}
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-xs font-medium text-content">{h.label}</span>
+                            <span className="block truncate font-mono text-[10px] text-content-faint">
+                              {h.username}@{h.address}
+                            </span>
+                          </span>
+                          {aiTargetHost === h.id && <Check size={14} className="shrink-0 text-accent" />}
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* tool list */}
+            <div className="min-h-0 flex-1 overflow-y-auto py-1">
+              <div className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-content-faint">
+                AI tools
+              </div>
+              {aiTargetMode === "remote" && !aiTargetHost && (
+                <p className="px-3 py-2 text-xs text-content-faint">Pick a host above first.</p>
+              )}
+              {aiTools.map((t) => {
+                // installed status only reflects the local machine's PATH
+                const installed = aiTargetMode !== "local" || aiInstalled === null
+                  ? null
+                  : aiInstalled.includes(t.command);
+                const disabled = aiTargetMode === "remote" && !aiTargetHost;
+                return (
+                  <button
+                    key={t.id}
+                    disabled={disabled}
+                    className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-content transition-colors duration-150 hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-40"
+                    onClick={() => launchAi(t.id, t.command, t.name)}
+                  >
+                    <Bot size={15} className="shrink-0 text-accent" />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate font-medium">{t.name}</span>
+                      <span className="block truncate font-mono text-[10px] text-content-faint">
+                        {t.command}{installed === false ? " · not on PATH" : ""}
+                      </span>
+                    </span>
+                    {installed !== null && (
+                      <span
+                        className={`h-2 w-2 shrink-0 rounded-full ${installed ? "bg-emerald-500" : "bg-content-faint/40"}`}
+                        title={installed ? "Installed" : "Not found on PATH"}
+                      />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </>
       )}

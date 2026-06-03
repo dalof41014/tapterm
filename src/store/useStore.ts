@@ -123,7 +123,7 @@ interface StoreState {
   setSearch: (s: string) => void;
 
   // tab actions
-  openHost: (hostId: string) => void;
+  openHost: (hostId: string, opts?: { command?: string; title?: string; aiTool?: string }) => void;
   openLocal: (opts?: { command?: string; title?: string; aiTool?: string }) => void;
   closeTab: (tabId: string) => void;
   clearTabs: () => void;
@@ -297,16 +297,18 @@ export const useStore = create<StoreState>((set, get) => ({
   setSearch: (s) =>
     set((st) => ({ search: s, searches: { ...st.searches, [st.sidebarView]: s } })),
 
-  openHost: (hostId) => {
+  openHost: (hostId, opts) => {
     const host = get().vault.hosts.find((h) => h.id === hostId);
     if (!host) return;
     const id = nanoid(8);
     const tab: Tab = {
       id,
       hostId,
-      title: host.label,
+      title: opts?.title ?? host.label,
       status: "connecting",
       kind: host.protocol === "telnet" ? "telnet" : "ssh",
+      startup: opts?.command,
+      aiTool: opts?.aiTool,
     };
     set((s) => {
       const recentHostIds = [hostId, ...s.recentHostIds.filter((x) => x !== hostId)].slice(0, 8);
