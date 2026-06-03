@@ -27,6 +27,44 @@ export interface AiTool {
   commands: AiCommand[];
 }
 
+/** Strip ANSI / VT escape sequences from captured terminal output. */
+function stripAnsi(s: string): string {
+  return s
+    .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "") // CSI sequences
+    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "") // OSC sequences
+    .replace(/\x1b[@-Z\\-_]/g, "") // other two-char escapes
+    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, ""); // stray control chars (keep \n \t)
+}
+
+function humanize(cmd: string): string {
+  const base = cmd.replace(/^\//, "").replace(/[-_:]+/g, " ").trim();
+  return base ? base.charAt(0).toUpperCase() + base.slice(1) : cmd;
+}
+
+/**
+ * Best-effort parse of a tool's interactive `/help` output into commands.
+ * Picks lines that begin with a single `/token` and captures any trailing
+ * description. Ignores filesystem-looking paths (a second slash). Interactive
+ * output is noisy, so this is advisory — the curated list stays as a fallback.
+ */
+export function parseSlashCommands(raw: string): AiCommand[] {
+  const text = stripAnsi(raw);
+  const seen = new Set<string>();
+  const out: AiCommand[] = [];
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.replace(/^[\s│|>*•\-–—]+/, "").trimEnd();
+    const m = line.match(/^(\/[A-Za-z][A-Za-z0-9_-]*)(?:\s+[-—:]?\s*(.*))?$/);
+    if (!m) continue;
+    const command = m[1];
+    if (command.length < 2 || command.length > 24 || seen.has(command)) continue;
+    seen.add(command);
+    const hint = (m[2] ?? "").trim().slice(0, 80) || undefined;
+    out.push({ label: humanize(command), command, hint });
+    if (out.length >= 60) break;
+  }
+  return out;
+}
+
 export const AI_TOOLS: AiTool[] = [
   {
     id: "claude",

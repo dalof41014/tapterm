@@ -1,5 +1,6 @@
 import { useState, type MouseEvent } from "react";
-import { Bot, Check, Copy, FolderTree, Palette, Pencil, Plus, Search, Server, SquarePlus, TerminalSquare, X } from "lucide-react";
+import { Bot, Check, Copy, FolderOpen, FolderTree, Palette, Pencil, Plus, Search, Server, SquarePlus, TerminalSquare, X } from "lucide-react";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useStore } from "../store/useStore";
 import { whichAvailable } from "../lib/api";
 import { TerminalView } from "./TerminalView";
@@ -24,6 +25,7 @@ export function Workspace() {
   const [aiTargetMode, setAiTargetMode] = useState<"local" | "remote">("local");
   const [aiTargetHost, setAiTargetHost] = useState<string | null>(null);
   const [aiHostQuery, setAiHostQuery] = useState("");
+  const [aiCwd, setAiCwd] = useState("");
   const aiTools = useStore((s) => s.aiTools);
 
   const startRename = (id: string, current: string) => setEditing({ id, value: current });
@@ -74,6 +76,7 @@ export function Workspace() {
     const r = e.currentTarget.getBoundingClientRect();
     setAiInstalled(null);
     setAiHostQuery("");
+    setAiCwd("");
     // default target: the active remote session if any, otherwise local
     if (activeTab && activeTab.kind === "ssh" && activeTab.hostId) {
       setAiTargetMode("remote");
@@ -87,14 +90,27 @@ export function Workspace() {
       .then(setAiInstalled)
       .catch(() => setAiInstalled([]));
   };
+  const browseAiCwd = async () => {
+    try {
+      const dir = await openDialog({ directory: true, multiple: false });
+      if (typeof dir === "string") setAiCwd(dir);
+    } catch {
+      /* cancelled */
+    }
+  };
   const launchAi = (toolId: string, command: string, name: string) => {
+    // optionally cd into the project folder first (the tool's working dir).
+    // Quote only when the path has spaces so `~` still expands on remote shells.
+    const cwd = aiCwd.trim();
+    const q = cwd.includes(" ") ? `"${cwd}"` : cwd;
+    const startup = cwd ? `cd ${q}\n${command}` : command;
     if (aiTargetMode === "local") {
-      openLocal({ command, title: name, aiTool: toolId });
+      openLocal({ command: startup, title: name, aiTool: toolId });
     } else {
       if (!aiTargetHost) return;
       const h = hosts.find((x) => x.id === aiTargetHost);
       openHost(aiTargetHost, {
-        command,
+        command: startup,
         aiTool: toolId,
         title: h ? `${name} · ${h.label}` : name,
       });
@@ -371,7 +387,7 @@ export function Workspace() {
               </div>
               <div className="flex gap-1.5">
                 <button
-                  onClick={() => { setAiTargetMode("local"); }}
+                  onClick={() => { setAiTargetMode("local"); setAiCwd(""); }}
                   className={`flex-1 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
                     aiTargetMode === "local"
                       ? "border-accent bg-accent-soft text-accent"
@@ -381,7 +397,7 @@ export function Workspace() {
                   Local
                 </button>
                 <button
-                  onClick={() => { setAiTargetMode("remote"); }}
+                  onClick={() => { setAiTargetMode("remote"); setAiCwd(""); }}
                   className={`flex-1 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
                     aiTargetMode === "remote"
                       ? "border-accent bg-accent-soft text-accent"
@@ -435,6 +451,33 @@ export function Workspace() {
                   </div>
                 </div>
               )}
+            </div>
+
+            {/* project folder (the tool's working directory) */}
+            <div className="border-b border-line p-2">
+              <div className="mb-1.5 px-1 text-[11px] font-semibold uppercase tracking-wide text-content-faint">
+                Project folder · optional
+              </div>
+              <div className="flex gap-1.5">
+                <input
+                  className="input py-1.5 text-xs"
+                  placeholder={aiTargetMode === "remote" ? "~/project or /srv/app" : "Project path"}
+                  value={aiCwd}
+                  onChange={(e) => setAiCwd(e.target.value)}
+                />
+                {aiTargetMode === "local" && (
+                  <button
+                    className="btn-surface shrink-0 px-2 py-1.5 text-xs"
+                    onClick={browseAiCwd}
+                    title="Browse for a folder"
+                  >
+                    <FolderOpen size={14} />
+                  </button>
+                )}
+              </div>
+              <p className="mt-1 px-1 text-[10px] text-content-faint">
+                The tool starts in this directory (its project). Leave empty for the default.
+              </p>
             </div>
 
             {/* tool list */}

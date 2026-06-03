@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { nanoid } from "nanoid";
 import * as api from "../lib/api";
-import { AI_TOOLS, type AiTool } from "../lib/aiTools";
+import { AI_TOOLS, type AiCommand, type AiTool } from "../lib/aiTools";
 import {
   emptyVault,
   type Group,
@@ -108,6 +108,9 @@ interface StoreState {
   aiTools: AiTool[];
   addAiTool: (name: string, command: string) => void;
   removeAiTool: (id: string) => void;
+  // commands fetched live from a tool's /help, keyed by tab id
+  aiCommands: Record<string, AiCommand[]>;
+  setAiCommands: (tabId: string, cmds: AiCommand[]) => void;
   // tabs
   tabs: Tab[];
   activeTabId: string | null;
@@ -265,6 +268,9 @@ export const useStore = create<StoreState>((set, get) => ({
       ls.setJSON("ai-tools-custom", custom);
       return { aiTools: [...AI_TOOLS, ...custom] };
     }),
+  aiCommands: {},
+  setAiCommands: (tabId, cmds) =>
+    set((s) => ({ aiCommands: { ...s.aiCommands, [tabId]: cmds } })),
   tabs: [],
   activeTabId: null,
 
@@ -337,7 +343,9 @@ export const useStore = create<StoreState>((set, get) => ({
       const tabs = s.tabs.filter((t) => t.id !== tabId);
       const activeTabId =
         s.activeTabId === tabId ? tabs[tabs.length - 1]?.id ?? null : s.activeTabId;
-      return { tabs, activeTabId };
+      const aiCommands = { ...s.aiCommands };
+      delete aiCommands[tabId];
+      return { tabs, activeTabId, aiCommands };
     }),
 
   clearTabs: () => set({ tabs: [], activeTabId: null }),
