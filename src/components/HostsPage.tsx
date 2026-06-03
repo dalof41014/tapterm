@@ -109,9 +109,11 @@ export function HostsPage() {
   const deleteHost = useStore((s) => s.deleteHost);
   const deleteHosts = useStore((s) => s.deleteHosts);
   const moveHostsToGroup = useStore((s) => s.moveHostsToGroup);
+  const search = useStore((s) => s.hostSearch);
+  const setSearch = useStore((s) => s.setHostSearch);
+  const activeTag = useStore((s) => s.hostTag);
+  const setActiveTag = useStore((s) => s.setHostTag);
 
-  const [search, setSearch] = useState("");
-  const [activeTag, setActiveTag] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [dragging, setDragging] = useState(false);
   const [dropGroup, setDropGroup] = useState<string | null | undefined>(undefined);

@@ -35,6 +35,10 @@ interface StoreState {
   toggleSidebar: () => void;
   mainView: MainView;
   setMainView: (v: MainView) => void;
+  hostSearch: string;
+  setHostSearch: (s: string) => void;
+  hostTag: string | null;
+  setHostTag: (t: string | null) => void;
   rightPanel: RightPanel;
   search: string;
   activeForwards: Set<string>;
@@ -113,6 +117,10 @@ export const useStore = create<StoreState>((set, get) => ({
   mainView: "terminals",
   // entering File Transfer auto-collapses the host list for a wider view
   setMainView: (v) => set({ mainView: v, sidebarCollapsed: v === "files" }),
+  hostSearch: "",
+  setHostSearch: (s) => set({ hostSearch: s }),
+  hostTag: null,
+  setHostTag: (t) => set({ hostTag: t }),
   rightPanel: "none",
   search: "",
   activeForwards: new Set(),
