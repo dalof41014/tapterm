@@ -289,10 +289,7 @@ impl Vault {
     /// and drop unlocked state so the user re-unlocks against the new contents.
     pub fn write_file_bytes(&self, bytes: &[u8]) -> anyhow::Result<()> {
         let mut g = self.inner.lock().unwrap();
-        if let Some(parent) = g.path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(&g.path, bytes)?;
+        write_atomic_retry(&g.path, bytes)?;
         g.key = None;
         g.data = VaultData::default();
         g.unlocked = false;
@@ -460,11 +457,41 @@ fn write_vault(
         ct: B64.encode(ct),
         no_password,
     };
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(path, serde_json::to_vec_pretty(&env)?)?;
+    write_atomic_retry(path, &serde_json::to_vec_pretty(&env)?)?;
     Ok(())
+}
+
+/// Write `bytes` to `path` resiliently. Cloud-sync folders (Google Drive for
+/// Desktop, Dropbox, OneDrive) intermittently lock or briefly hide the target
+/// file while they sync it — surfacing as os error 3 (path not found), 5
+/// (access denied) or 32 (sharing violation). We write atomically (temp file +
+/// rename) and retry a few times with backoff before giving up, with a plain
+/// in-place write as a last-ditch fallback each round.
+fn write_atomic_retry(path: &PathBuf, bytes: &[u8]) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let tmp = path.with_file_name(format!(
+        "{}.tmp",
+        path.file_name().and_then(|s| s.to_str()).unwrap_or("vault.json")
+    ));
+
+    let mut last: Option<std::io::Error> = None;
+    for attempt in 0..6u64 {
+        match std::fs::write(&tmp, bytes).and_then(|_| std::fs::rename(&tmp, path)) {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                let _ = std::fs::remove_file(&tmp);
+                // last-ditch in-place write in case rename is what's blocked
+                if std::fs::write(path, bytes).is_ok() {
+                    return Ok(());
+                }
+                last = Some(e);
+                std::thread::sleep(std::time::Duration::from_millis(150 * (attempt + 1)));
+            }
+        }
+    }
+    Err(last.unwrap_or_else(|| std::io::Error::new(std::io::ErrorKind::Other, "write failed")))
 }
 
 fn vault_path() -> PathBuf {

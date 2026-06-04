@@ -107,16 +107,9 @@ export function TerminalView({ tab }: { tab: Tab }) {
         }
         return true;
       }
-      // Ctrl/Cmd+Shift+V → paste into the session
-      if (mod && e.shiftKey && key === "v") {
-        navigator.clipboard
-          .readText()
-          .then((t) => {
-            if (t) sendInput(t).catch(() => {});
-          })
-          .catch(() => {});
-        return false;
-      }
+      // Paste (Ctrl/Cmd+Shift+V, Ctrl/Cmd+V, right-click, middle-click) is handled
+      // natively by xterm.js, including bracketed-paste mode. We must NOT also read
+      // the clipboard and send it here — that delivered every paste twice.
       // Ctrl/Cmd+F → search
       if (mod && !e.shiftKey && key === "f") {
         setSearchOpen(true);
