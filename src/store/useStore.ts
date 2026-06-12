@@ -104,6 +104,8 @@ interface StoreState {
   setLocalFont: (id: string) => void;
   settingsOpen: boolean;
   setSettingsOpen: (v: boolean) => void;
+  quickOpen: boolean;
+  setQuickOpen: (v: boolean) => void;
   // ai tools
   aiTools: AiTool[];
   addAiTool: (name: string, command: string) => void;
@@ -250,6 +252,8 @@ export const useStore = create<StoreState>((set, get) => ({
   },
   settingsOpen: false,
   setSettingsOpen: (v) => set({ settingsOpen: v }),
+  quickOpen: false,
+  setQuickOpen: (v) => set({ quickOpen: v }),
   // built-in AI tools (with curated commands) + any user-added custom tools
   aiTools: [
     ...AI_TOOLS,

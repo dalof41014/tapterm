@@ -475,6 +475,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-xs">
           {[
             ["Toggle sidebar", "Ctrl/⌘ B"],
+            ["Quick switch session", "Ctrl/⌘ P"],
             ["New local terminal", "Ctrl/⌘ T"],
             ["Switch to tab 1–9", "Ctrl/⌘ 1–9"],
             ["Next / prev tab", "Ctrl/⌘ (Shift) Tab"],

@@ -1,5 +1,5 @@
 import { useState, type MouseEvent } from "react";
-import { Bot, Check, Copy, FolderOpen, FolderTree, Palette, Pencil, Plus, Search, Server, SquarePlus, TerminalSquare, X } from "lucide-react";
+import { Bot, Check, ChevronDown, Copy, FolderOpen, FolderTree, Palette, Pencil, Plus, Search, Server, SquarePlus, TerminalSquare, X } from "lucide-react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useStore } from "../store/useStore";
 import { whichAvailable } from "../lib/api";
@@ -27,6 +27,8 @@ export function Workspace() {
   const [aiTargetHost, setAiTargetHost] = useState<string | null>(null);
   const [aiHostQuery, setAiHostQuery] = useState("");
   const [aiCwd, setAiCwd] = useState("");
+  const [tabList, setTabList] = useState<{ x: number; y: number } | null>(null);
+  const [tabQuery, setTabQuery] = useState("");
   const aiTools = useStore((s) => s.aiTools);
 
   const startRename = (id: string, current: string) => setEditing({ id, value: current });
@@ -56,6 +58,30 @@ export function Workspace() {
           h.tags.some((t) => t.toLowerCase().includes(cq)),
       )
     : hosts;
+
+  const ttq = tabQuery.toLowerCase();
+  const shownTabs = ttq
+    ? tabs.filter((t) => {
+        const h = hosts.find((x) => x.id === t.hostId);
+        return (
+          t.title.toLowerCase().includes(ttq) ||
+          (h &&
+            (h.label.toLowerCase().includes(ttq) ||
+              h.address.toLowerCase().includes(ttq) ||
+              h.username.toLowerCase().includes(ttq)))
+        );
+      })
+    : tabs;
+  const tabSub = (t: (typeof tabs)[number]) => {
+    const h = hosts.find((x) => x.id === t.hostId);
+    return h
+      ? `${h.username}@${h.address}`
+      : t.kind === "local"
+        ? "Local shell"
+        : t.kind === "telnet"
+          ? "Telnet"
+          : "";
+  };
 
   const openNewConn = (e: MouseEvent<HTMLButtonElement>) => {
     const r = e.currentTarget.getBoundingClientRect();
@@ -201,8 +227,23 @@ export function Workspace() {
           )}
         </div>
 
+        {tabs.length > 0 && (
+          <button
+            className={`btn-ghost ml-2 px-2 py-1.5 text-xs ${tabList ? "bg-surface text-content" : ""}`}
+            onClick={(e) => {
+              const r = e.currentTarget.getBoundingClientRect();
+              setTabQuery("");
+              setTabList({ x: r.right, y: r.bottom + 4 });
+            }}
+            title="All sessions (Ctrl/⌘P)"
+          >
+            <ChevronDown size={15} />
+            {tabs.length}
+          </button>
+        )}
+
         <button
-          className={`btn-ghost ml-2 px-2 py-1.5 text-xs ${
+          className={`btn-ghost ml-1 px-2 py-1.5 text-xs ${
             rightPanel === "themes" ? "bg-surface text-content" : ""
           }`}
           onClick={() => setRightPanel("themes")}
@@ -303,6 +344,71 @@ export function Workspace() {
             >
               <X size={15} /> Close
             </button>
+          </div>
+        </>
+      )}
+
+      {/* all-sessions overflow menu */}
+      {tabList && (
+        <>
+          <div
+            className="fixed inset-0 z-40"
+            onClick={() => setTabList(null)}
+            onContextMenu={(e) => { e.preventDefault(); setTabList(null); }}
+          />
+          <div
+            className="fixed z-50 flex max-h-[60vh] w-72 flex-col overflow-hidden rounded-xl border border-line-strong bg-bg-raised shadow-2xl animate-fade-in"
+            style={{
+              left: Math.max(8, Math.min(tabList.x - 288, window.innerWidth - 296)),
+              top: Math.min(tabList.y, window.innerHeight - 360),
+            }}
+          >
+            <div className="border-b border-line p-2">
+              <div className="relative">
+                <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-content-faint" />
+                <input
+                  autoFocus
+                  className="input py-1.5 pl-8 text-xs"
+                  placeholder="Search sessions…"
+                  value={tabQuery}
+                  onChange={(e) => setTabQuery(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Escape") setTabList(null); }}
+                />
+              </div>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto p-1">
+              {shownTabs.length === 0 ? (
+                <p className="px-3 py-6 text-center text-xs text-content-faint">No sessions.</p>
+              ) : (
+                shownTabs.map((t) => {
+                  const sub = tabSub(t);
+                  return (
+                    <div
+                      key={t.id}
+                      onClick={() => { setActiveTab(t.id); setTabList(null); }}
+                      className={`group flex cursor-pointer items-center gap-2.5 rounded-lg px-2 py-1.5 transition-colors ${
+                        t.id === activeTabId ? "bg-accent-soft" : "hover:bg-surface-hover"
+                      }`}
+                    >
+                      <span className={`h-2 w-2 shrink-0 rounded-full ${statusDot(t.status)}`} />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium text-content">{t.title}</span>
+                        {sub && (
+                          <span className="block truncate font-mono text-[11px] text-content-faint">{sub}</span>
+                        )}
+                      </span>
+                      <button
+                        className="btn-ghost shrink-0 p-1 opacity-0 transition-opacity hover:text-danger group-hover:opacity-100"
+                        title="Close"
+                        onClick={(e) => { e.stopPropagation(); closeTab(t.id); }}
+                      >
+                        <X size={13} />
+                      </button>
+                    </div>
+                  );
+                })
+              )}
+            </div>
           </div>
         </>
       )}

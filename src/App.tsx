@@ -8,6 +8,7 @@ import { FileManager } from "./components/FileManager";
 import { HostsPage } from "./components/HostsPage";
 import { TitleBar } from "./components/TitleBar";
 import { UpdateToast } from "./components/UpdateToast";
+import { QuickSwitch } from "./components/QuickSwitch";
 
 export default function App() {
   const status = useStore((s) => s.status);
@@ -56,6 +57,7 @@ export default function App() {
       let handled = true;
       if (k === "b") s.toggleSidebar();
       else if (k === "t" && !e.shiftKey) s.openLocal();
+      else if (k === "p" && !e.shiftKey) s.setQuickOpen(true);
       else if (k === ",") s.setSettingsOpen(!s.settingsOpen);
       else if (k === "w" && e.shiftKey) {
         if (s.activeTabId) s.closeTab(s.activeTabId);
@@ -111,6 +113,7 @@ export default function App() {
         </div>
       )}
       <UpdateToast />
+      {unlocked && <QuickSwitch />}
     </div>
   );
 }

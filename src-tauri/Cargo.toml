@@ -1,6 +1,6 @@
 [package]
 name = "tapterm"
-version = "0.1.26"
+version = "0.1.27"
 description = "Tapterm — a modern SSH/SFTP client built with Tauri"
 authors = ["you"]
 edition = "2021"
