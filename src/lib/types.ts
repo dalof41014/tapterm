@@ -23,6 +23,8 @@ export interface Host {
   jumpHostId?: string | null;
   font?: string | null;
   protocol?: "ssh" | "telnet" | null;
+  persistent?: boolean;
+  persistSession?: string | null;
 }
 
 export interface SshKey {

@@ -5,6 +5,8 @@ import { useStore } from "../store/useStore";
 import { whichAvailable } from "../lib/api";
 import { AI_ENABLED } from "../lib/aiTools";
 import { TerminalView } from "./TerminalView";
+import { TmuxView } from "./TmuxView";
+import { TMUX_ENABLED } from "../lib/flags";
 import { SftpPanel } from "./panels/SftpPanel";
 import { ThemePanel } from "./panels/ThemePanel";
 import { AiCommandPanel } from "./panels/AiCommandPanel";
@@ -16,6 +18,7 @@ export function Workspace() {
   const closeTab = useStore((s) => s.closeTab);
   const openLocal = useStore((s) => s.openLocal);
   const openHost = useStore((s) => s.openHost);
+  const openTmux = useStore((s) => s.openTmux);
   const renameTab = useStore((s) => s.renameTab);
   const [tabMenu, setTabMenu] = useState<{ x: number; y: number; id: string } | null>(null);
   const [editing, setEditing] = useState<{ id: string; value: string } | null>(null);
@@ -40,6 +43,7 @@ export function Workspace() {
     const t = tabs.find((x) => x.id === id);
     if (!t) return;
     if (t.kind === "local") openLocal();
+    else if (t.kind === "tmux") openTmux(t.hostId, { session: t.tmuxSession, title: t.title });
     else openHost(t.hostId);
   };
   const rightPanel = useStore((s) => s.rightPanel);
@@ -291,7 +295,7 @@ export function Workspace() {
                 className="absolute inset-0"
                 style={{ display: t.id === activeTabId ? "block" : "none" }}
               >
-                <TerminalView tab={t} />
+                {t.kind === "tmux" ? <TmuxView tab={t} /> : <TerminalView tab={t} />}
               </div>
             ))
           )}
@@ -452,24 +456,37 @@ export function Workspace() {
                 <p className="px-3 py-6 text-center text-xs text-content-faint">No matches.</p>
               ) : (
                 connHosts.map((h) => (
-                  <button
+                  <div
                     key={h.id}
-                    className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors duration-150 hover:bg-surface-hover"
-                    onClick={() => { openHost(h.id); setNewConn(null); }}
+                    className="group flex items-center rounded-lg pr-1 transition-colors duration-150 hover:bg-surface-hover"
                   >
-                    <span
-                      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[11px] font-bold uppercase"
-                      style={{ background: (h.color ?? "#22C55E") + "22", color: h.color ?? "#22C55E" }}
+                    <button
+                      className="flex min-w-0 flex-1 items-center gap-2.5 px-2 py-1.5 text-left"
+                      onClick={() => { openHost(h.id); setNewConn(null); }}
                     >
-                      {h.label.slice(0, 2)}
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-medium text-content">{h.label}</span>
-                      <span className="block truncate font-mono text-[11px] text-content-faint">
-                        {h.username}@{h.address}
+                      <span
+                        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[11px] font-bold uppercase"
+                        style={{ background: (h.color ?? "#22C55E") + "22", color: h.color ?? "#22C55E" }}
+                      >
+                        {h.label.slice(0, 2)}
                       </span>
-                    </span>
-                  </button>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium text-content">{h.label}</span>
+                        <span className="block truncate font-mono text-[11px] text-content-faint">
+                          {h.username}@{h.address}
+                        </span>
+                      </span>
+                    </button>
+                    {TMUX_ENABLED && h.protocol !== "telnet" && (
+                      <button
+                        className="btn-ghost shrink-0 rounded-md px-1.5 py-1 text-[10px] font-semibold uppercase tracking-wide opacity-0 transition-opacity group-hover:opacity-100"
+                        title="Open in tmux (control mode)"
+                        onClick={() => { openTmux(h.id); setNewConn(null); }}
+                      >
+                        tmux
+                      </button>
+                    )}
+                  </div>
                 ))
               )}
             </div>

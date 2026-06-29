@@ -32,8 +32,13 @@ export const gdrivePush = () => invoke<void>("gdrive_push");
 export const gdrivePull = () => invoke<void>("gdrive_pull");
 
 // ---- ssh shell ----
-export const sshOpenShell = (id: string, hostId: string, cols: number, rows: number) =>
-  invoke<void>("ssh_open_shell", { id, hostId, cols, rows });
+export const sshOpenShell = (
+  id: string,
+  hostId: string,
+  cols: number,
+  rows: number,
+  command?: string,
+) => invoke<void>("ssh_open_shell", { id, hostId, cols, rows, command });
 export const sshSend = (id: string, data: string) => invoke<void>("ssh_send", { id, data });
 export const sshResize = (id: string, cols: number, rows: number) =>
   invoke<void>("ssh_resize", { id, cols, rows });
@@ -54,6 +59,17 @@ export const telnetSend = (id: string, data: string) => invoke<void>("telnet_sen
 export const telnetResize = (id: string, cols: number, rows: number) =>
   invoke<void>("telnet_resize", { id, cols, rows });
 export const telnetClose = (id: string) => invoke<void>("telnet_close", { id });
+
+// ---- tmux control mode ----
+export const tmuxOpen = (id: string, hostId: string, cols: number, rows: number, session: string) =>
+  invoke<void>("tmux_open", { id, hostId, cols, rows, session });
+export const tmuxInput = (id: string, pane: number, data: string) =>
+  invoke<void>("tmux_input", { id, pane, data });
+export const tmuxCommand = (id: string, cmd: string) =>
+  invoke<void>("tmux_command", { id, cmd });
+export const tmuxResize = (id: string, cols: number, rows: number) =>
+  invoke<void>("tmux_resize", { id, cols, rows });
+export const tmuxClose = (id: string) => invoke<void>("tmux_close", { id });
 
 // ---- sftp ----
 export const sftpList = (hostId: string, path: string) =>

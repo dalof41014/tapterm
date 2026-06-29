@@ -57,6 +57,12 @@ pub struct Host {
     /// Connection protocol: "ssh" (default) or "telnet".
     #[serde(default)]
     pub protocol: Option<String>,
+    /// Wrap the SSH shell in tmux so the session survives drops (persistent).
+    #[serde(default)]
+    pub persistent: bool,
+    /// tmux session name to attach/create when `persistent` (default "tapterm").
+    #[serde(default)]
+    pub persist_session: Option<String>,
 }
 
 fn default_port() -> u16 {

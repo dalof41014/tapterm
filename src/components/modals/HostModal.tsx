@@ -36,6 +36,8 @@ export function HostModal({
   const [jumpHostId, setJumpHostId] = useState(host?.jumpHostId ?? "");
   const [font, setFont] = useState(host?.font ?? "");
   const [protocol, setProtocol] = useState<"ssh" | "telnet">(host?.protocol ?? "ssh");
+  const [persistent, setPersistent] = useState(host?.persistent ?? false);
+  const [persistSession, setPersistSession] = useState(host?.persistSession ?? "");
   const hosts = useStore((s) => s.vault.hosts);
 
   const changeProtocol = (p: "ssh" | "telnet") => {
@@ -66,6 +68,8 @@ export function HostModal({
       jumpHostId: protocol === "telnet" ? null : jumpHostId || null,
       font: font || null,
       protocol,
+      persistent: protocol === "telnet" ? false : persistent,
+      persistSession: persistSession.trim() || null,
     };
     try {
       await saveHost(next);
@@ -161,6 +165,37 @@ export function HostModal({
                 </option>
               ))}
           </select>
+        </Field>
+      )}
+
+      {protocol === "ssh" && (
+        <Field label="Persistent session" hint="Wraps the shell in tmux so it survives disconnects and auto-reconnects (requires tmux on the host).">
+          <button
+            type="button"
+            onClick={() => setPersistent((v) => !v)}
+            className={`flex w-full items-center gap-2.5 rounded-lg border px-3 py-2 text-left text-xs transition-colors cursor-pointer ${
+              persistent
+                ? "border-accent bg-accent-soft text-content"
+                : "border-line-strong text-content-muted hover:bg-surface-hover"
+            }`}
+          >
+            <span
+              className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
+                persistent ? "border-accent bg-accent text-bg" : "border-line-strong"
+              }`}
+            >
+              {persistent && "✓"}
+            </span>
+            Keep this session alive with tmux
+          </button>
+          {persistent && (
+            <input
+              className="input mt-2 font-mono"
+              value={persistSession}
+              onChange={(e) => setPersistSession(e.target.value)}
+              placeholder="tmux session name (default: tapterm)"
+            />
+          )}
         </Field>
       )}
 

@@ -47,12 +47,19 @@ export function TerminalView({ tab }: { tab: Tab }) {
   const localFontId = useStore((s) => s.localFontId);
   const resolvedFont = tab.kind === "local" ? localFontId : host?.font || fontId;
 
+  // Persistent SSH: wrap the shell in tmux so the remote session survives drops
+  // and we can auto-reconnect/reattach.
+  const persist = tab.kind === "ssh" && !!host?.persistent;
+  const persistCmd = persist
+    ? `tmux new -A -s ${host?.persistSession || "tapterm"}`
+    : undefined;
+
   const openSession = (c: number, r: number) =>
     tab.kind === "telnet"
       ? telnetOpen(tab.id, tab.hostId, c, r)
       : tab.kind === "local"
         ? localOpen(tab.id, c, r)
-        : sshOpenShell(tab.id, tab.hostId, c, r);
+        : sshOpenShell(tab.id, tab.hostId, c, r, persistCmd);
   const sendInput = (d: string) =>
     tab.kind === "telnet" ? telnetSend(tab.id, d) : tab.kind === "local" ? localSend(tab.id, d) : sshSend(tab.id, d);
   const resizeSession = (c: number, r: number) =>
@@ -121,31 +128,67 @@ export function TerminalView({ tab }: { tab: Tab }) {
     let unlistenData: UnlistenFn | undefined;
     let unlistenClosed: UnlistenFn | undefined;
     let disposed = false;
-    let firstData = true;
+    let startupSent = false;
+    let liveConnected = false; // got data on the current connection attempt
+    let attempts = 0; // consecutive rapid failures (reset once a session lives a while)
+    let openedAt = 0;
+    let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+    const MAX_FAST = 6;
 
-    (async () => {
-      unlistenData = await listen<string>(`ssh://data/${tab.id}`, (e) => {
-        if (firstData) {
-          firstData = false;
-          setTabStatus(tab.id, "connected");
-          // Send the startup command (e.g. an AI CLI) once the shell prompt is ready.
-          if (tab.startup) sendInput(tab.startup + "\n").catch(() => {});
-        }
-        term.write(e.payload);
-      });
-      unlistenClosed = await listen(`ssh://closed/${tab.id}`, () => {
-        setTabStatus(tab.id, "closed");
-        term.write("\r\n\x1b[2m[ session closed ]\x1b[0m\r\n");
-      });
-
+    const connect = async () => {
+      liveConnected = false;
+      openedAt = Date.now();
       try {
         await openSession(term.cols, term.rows);
       } catch (err) {
-        if (!disposed) {
-          setTabStatus(tab.id, "error", String(err));
-          term.write(`\r\n\x1b[31m✖ ${String(err)}\x1b[0m\r\n`);
-        }
+        if (disposed) return;
+        term.write(`\r\n\x1b[31m✖ ${String(err)}\x1b[0m\r\n`);
+        if (persist) onClosed();
+        else setTabStatus(tab.id, "error", String(err));
       }
+    };
+
+    const onClosed = () => {
+      if (disposed) return;
+      if (!persist) {
+        setTabStatus(tab.id, "closed");
+        term.write("\r\n\x1b[2m[ session closed ]\x1b[0m\r\n");
+        return;
+      }
+      // A session that lived a while then dropped is a fresh failure; rapid exits
+      // (e.g. tmux missing → instant exit) accumulate and eventually give up.
+      if (Date.now() - openedAt > 5000) attempts = 0;
+      attempts += 1;
+      if (attempts > MAX_FAST) {
+        setTabStatus(tab.id, "error", "Reconnect failed — is tmux installed on the host?");
+        term.write(
+          "\r\n\x1b[31m[ reconnect failed — check that tmux is installed on the host ]\x1b[0m\r\n",
+        );
+        return;
+      }
+      setTabStatus(tab.id, "connecting");
+      term.write("\r\n\x1b[2m[ disconnected — reconnecting… ]\x1b[0m\r\n");
+      const delay = Math.min(8000, 500 * 2 ** (attempts - 1));
+      reconnectTimer = setTimeout(() => {
+        if (!disposed) connect();
+      }, delay);
+    };
+
+    (async () => {
+      unlistenData = await listen<string>(`ssh://data/${tab.id}`, (e) => {
+        if (!liveConnected) {
+          liveConnected = true;
+          setTabStatus(tab.id, "connected");
+          // Send the startup command (e.g. an AI CLI) once, after the prompt is ready.
+          if (!startupSent && tab.startup) {
+            startupSent = true;
+            sendInput(tab.startup + "\n").catch(() => {});
+          }
+        }
+        term.write(e.payload);
+      });
+      unlistenClosed = await listen(`ssh://closed/${tab.id}`, onClosed);
+      await connect();
     })();
 
     const onData = term.onData((data) => {
@@ -169,6 +212,7 @@ export function TerminalView({ tab }: { tab: Tab }) {
 
     return () => {
       disposed = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
       ro.disconnect();
       onData.dispose();
       unlistenData?.();

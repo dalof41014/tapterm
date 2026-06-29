@@ -40,7 +40,7 @@ impl SshManager {
 
 // ---- russh client handler: verify server key against known-hosts (TOFU) ----
 
-struct ClientHandler {
+pub(crate) struct ClientHandler {
     /// Known fingerprint for this host, if any. None ⇒ trust-on-first-use.
     expected: Option<String>,
     /// What the server actually presented: (fingerprint, key_type).
@@ -105,7 +105,7 @@ pub struct ConnectParams {
 }
 
 /// Jump-host handles that must be kept alive for the duration of the session.
-type Keepalive = Vec<Handle<ClientHandler>>;
+pub(crate) type Keepalive = Vec<Handle<ClientHandler>>;
 
 impl SshManager {
     /// Connect + verify the host key + authenticate. Connects through a jump
@@ -114,7 +114,7 @@ impl SshManager {
     ///
     /// Returns the target handle plus any upstream jump handles that must stay
     /// alive (dropping them would tear down the tunnel).
-    async fn connect(
+    pub async fn connect(
         &self,
         p: &ConnectParams,
     ) -> anyhow::Result<(Handle<ClientHandler>, Keepalive)> {
@@ -221,6 +221,7 @@ impl SshManager {
         app: AppHandle,
         id: String,
         params: ConnectParams,
+        command: Option<String>,
     ) -> anyhow::Result<()> {
         let (handle, keepalive) = self.connect(&params).await?;
         let channel = handle.channel_open_session().await?;
@@ -236,7 +237,12 @@ impl SshManager {
                 &[(Pty::ECHO, 1), (Pty::TTY_OP_ISPEED, 14400), (Pty::TTY_OP_OSPEED, 14400)],
             )
             .await?;
-        channel.request_shell(true).await?;
+        // A command (e.g. `tmux new -A -s <name>` for persistent sessions) runs in
+        // place of the login shell; otherwise open a normal interactive shell.
+        match command {
+            Some(cmd) if !cmd.is_empty() => channel.exec(true, cmd.as_bytes()).await?,
+            _ => channel.request_shell(true).await?,
+        }
 
         let (tx, mut rx) = mpsc::unbounded_channel::<SessionCmd>();
         self.sessions.lock().await.insert(id.clone(), tx);

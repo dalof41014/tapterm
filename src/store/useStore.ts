@@ -56,11 +56,13 @@ export interface Tab {
   title: string;
   status: "connecting" | "connected" | "closed" | "error";
   error?: string;
-  kind: "ssh" | "local" | "telnet";
+  kind: "ssh" | "local" | "telnet" | "tmux";
   /** Command auto-sent into the session once it's ready (e.g. an AI CLI). */
   startup?: string;
   /** Id of the AI tool this tab runs, if launched from the AI launcher. */
   aiTool?: string;
+  /** tmux session name to attach/create (kind === "tmux" only). */
+  tmuxSession?: string;
 }
 
 interface StoreState {
@@ -130,6 +132,7 @@ interface StoreState {
   // tab actions
   openHost: (hostId: string, opts?: { command?: string; title?: string; aiTool?: string }) => void;
   openLocal: (opts?: { command?: string; title?: string; aiTool?: string }) => void;
+  openTmux: (hostId: string, opts?: { session?: string; title?: string }) => void;
   closeTab: (tabId: string) => void;
   clearTabs: () => void;
   renameTab: (tabId: string, title: string) => void;
@@ -319,6 +322,26 @@ export const useStore = create<StoreState>((set, get) => ({
       kind: host.protocol === "telnet" ? "telnet" : "ssh",
       startup: opts?.command,
       aiTool: opts?.aiTool,
+    };
+    set((s) => {
+      const recentHostIds = [hostId, ...s.recentHostIds.filter((x) => x !== hostId)].slice(0, 8);
+      ls.setJSON("recent-hosts", recentHostIds);
+      return { tabs: [...s.tabs, tab], activeTabId: id, recentHostIds };
+    });
+  },
+
+  openTmux: (hostId, opts) => {
+    const host = get().vault.hosts.find((h) => h.id === hostId);
+    if (!host) return;
+    const id = nanoid(8);
+    const session = opts?.session ?? "tapterm";
+    const tab: Tab = {
+      id,
+      hostId,
+      title: opts?.title ?? `${host.label} (tmux)`,
+      status: "connecting",
+      kind: "tmux",
+      tmuxSession: session,
     };
     set((s) => {
       const recentHostIds = [hostId, ...s.recentHostIds.filter((x) => x !== hostId)].slice(0, 8);

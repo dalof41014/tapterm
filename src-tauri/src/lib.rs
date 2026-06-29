@@ -3,6 +3,7 @@ mod local;
 mod ssh;
 mod sync;
 mod telnet;
+mod tmux;
 mod vault;
 
 use sync::GDriveConfig;
@@ -19,6 +20,7 @@ struct AppState {
     ssh: SshManager,
     local: local::LocalManager,
     telnet: telnet::TelnetManager,
+    tmux: tmux::TmuxManager,
 }
 
 fn map_err<T>(r: anyhow::Result<T>) -> Result<T, String> {
@@ -316,12 +318,13 @@ async fn ssh_open_shell(
     app: AppHandle,
     state: State<'_, AppState>,
     id: String,
+    command: Option<String>,
     host_id: String,
     cols: u16,
     rows: u16,
 ) -> Result<(), String> {
     let params = params_for(&state, &host_id, cols, rows)?;
-    map_err(state.ssh.open_shell(app, id, params).await)
+    map_err(state.ssh.open_shell(app, id, params, command).await)
 }
 
 #[tauri::command]
@@ -407,6 +410,56 @@ async fn telnet_resize(
 #[tauri::command]
 async fn telnet_close(state: State<'_, AppState>, id: String) -> Result<(), String> {
     state.telnet.close(&id).await;
+    Ok(())
+}
+
+// ---------- tmux control-mode commands ----------
+
+#[tauri::command]
+async fn tmux_open(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    host_id: String,
+    cols: u16,
+    rows: u16,
+    session: String,
+) -> Result<(), String> {
+    let params = params_for(&state, &host_id, cols, rows)?;
+    map_err(state.tmux.open(app, id, params, session).await)
+}
+
+#[tauri::command]
+async fn tmux_input(
+    state: State<'_, AppState>,
+    id: String,
+    pane: u32,
+    data: String,
+) -> Result<(), String> {
+    state.tmux.input(&id, pane, data.into_bytes()).await;
+    Ok(())
+}
+
+#[tauri::command]
+async fn tmux_command(state: State<'_, AppState>, id: String, cmd: String) -> Result<(), String> {
+    state.tmux.command(&id, cmd).await;
+    Ok(())
+}
+
+#[tauri::command]
+async fn tmux_resize(
+    state: State<'_, AppState>,
+    id: String,
+    cols: u16,
+    rows: u16,
+) -> Result<(), String> {
+    state.tmux.resize(&id, cols, rows).await;
+    Ok(())
+}
+
+#[tauri::command]
+async fn tmux_close(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    state.tmux.close(&id).await;
     Ok(())
 }
 
@@ -716,11 +769,13 @@ pub fn run() {
     builder
         .manage({
             let vault = Arc::new(Vault::new());
+            let ssh = SshManager::new(vault.clone());
             AppState {
                 vault: vault.clone(),
-                ssh: SshManager::new(vault),
+                ssh: ssh.clone(),
                 local: local::LocalManager::new(),
                 telnet: telnet::TelnetManager::new(),
+                tmux: tmux::TmuxManager::new(ssh.clone()),
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -756,6 +811,11 @@ pub fn run() {
             telnet_send,
             telnet_resize,
             telnet_close,
+            tmux_open,
+            tmux_input,
+            tmux_command,
+            tmux_resize,
+            tmux_close,
             sftp_list,
             sftp_download,
             sftp_upload,
