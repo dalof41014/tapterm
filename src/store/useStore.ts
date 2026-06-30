@@ -334,7 +334,9 @@ export const useStore = create<StoreState>((set, get) => ({
     const host = get().vault.hosts.find((h) => h.id === hostId);
     if (!host) return;
     const id = nanoid(8);
-    const session = opts?.session ?? "tapterm";
+    // Distinct from the persistent-SSH session name ("tapterm") so opening a
+    // control-mode tab doesn't attach (mirror) a persistent full-screen session.
+    const session = opts?.session ?? "tapterm-cc";
     const tab: Tab = {
       id,
       hostId,

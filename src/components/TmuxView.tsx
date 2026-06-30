@@ -80,7 +80,7 @@ export function TmuxView({ tab }: { tab: Tab }) {
       openedAt = Date.now();
       const { cols, rows } = computeDims();
       lastDimsRef.current = { cols, rows };
-      tmuxOpen(tab.id, tab.hostId, cols, rows, tab.tmuxSession ?? "tapterm").catch((err) => {
+      tmuxOpen(tab.id, tab.hostId, cols, rows, tab.tmuxSession ?? "tapterm-cc").catch((err) => {
         if (!disposed) onClosed(String(err));
       });
     };

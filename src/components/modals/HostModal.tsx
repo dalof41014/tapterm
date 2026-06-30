@@ -69,7 +69,10 @@ export function HostModal({
       font: font || null,
       protocol,
       persistent: protocol === "telnet" ? false : persistent,
-      persistSession: persistSession.trim() || null,
+      persistSession:
+        protocol !== "telnet" && persistent
+          ? persistSession.trim() || `tapterm-${nanoid(6)}`
+          : persistSession.trim() || null,
     };
     try {
       await saveHost(next);
@@ -172,7 +175,12 @@ export function HostModal({
         <Field label="Persistent session" hint="Wraps the shell in tmux so it survives disconnects and auto-reconnects (requires tmux on the host).">
           <button
             type="button"
-            onClick={() => setPersistent((v) => !v)}
+            onClick={() => {
+              const next = !persistent;
+              setPersistent(next);
+              // auto-create a unique, recorded session name on first enable
+              if (next && !persistSession.trim()) setPersistSession(`tapterm-${nanoid(6)}`);
+            }}
             className={`flex w-full items-center gap-2.5 rounded-lg border px-3 py-2 text-left text-xs transition-colors cursor-pointer ${
               persistent
                 ? "border-accent bg-accent-soft text-content"
@@ -193,7 +201,7 @@ export function HostModal({
               className="input mt-2 font-mono"
               value={persistSession}
               onChange={(e) => setPersistSession(e.target.value)}
-              placeholder="tmux session name (default: tapterm)"
+              placeholder="auto-generated unique name"
             />
           )}
         </Field>
