@@ -4645,7 +4645,7 @@ dependencies = [
 
 [[package]]
 name = "tapterm"
-version = "0.1.32"
+version = "0.1.33"
 dependencies = [
  "aes-gcm",
  "anyhow",

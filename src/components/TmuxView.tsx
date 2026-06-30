@@ -42,8 +42,10 @@ export function TmuxView({ tab }: { tab: Tab }) {
   const pendingOutputRef = useRef<Map<number, string[]>>(new Map());
   const cellSizeRef = useRef<{ w: number; h: number }>({ w: EST_CELL_W, h: EST_CELL_H });
   const lastDimsRef = useRef<{ cols: number; rows: number }>({ cols: 0, rows: 0 });
+  const userClosingRef = useRef(0); // timestamp of a user-initiated kill-pane
 
   const setTabStatus = useStore((s) => s.setTabStatus);
+  const closeTab = useStore((s) => s.closeTab);
   const host = useStore((s) => s.vault.hosts.find((h) => h.id === tab.hostId));
   const themeId = useStore((s) => s.terminalThemeId);
   const fontId = useStore((s) => s.terminalFontId);
@@ -90,6 +92,12 @@ export function TmuxView({ tab }: { tab: Tab }) {
     // exits (e.g. tmux not installed) accumulate and eventually give up.
     const onClosed = (errMsg?: string) => {
       if (disposed) return;
+      // The user just killed the last pane → the session ended on purpose; close
+      // the tab instead of auto-reattaching into a freshly recreated session.
+      if (Date.now() - userClosingRef.current < 2500) {
+        closeTab(tab.id);
+        return;
+      }
       if (connectedThisTry || Date.now() - openedAt > 5000) attempts = 0;
       attempts += 1;
       if (attempts > MAX_FAST) {
@@ -228,18 +236,19 @@ export function TmuxView({ tab }: { tab: Tab }) {
           tmuxCommand(tab.id, `select-window -t @${w}`).catch(() => {});
         }}
         onNewWindow={() => tmuxCommand(tab.id, "new-window").catch(() => {})}
-        onSplitH={() =>
-          focusedPane != null &&
-          tmuxCommand(tab.id, `split-window -h -t %${focusedPane}`).catch(() => {})
-        }
-        onSplitV={() =>
-          focusedPane != null &&
-          tmuxCommand(tab.id, `split-window -v -t %${focusedPane}`).catch(() => {})
-        }
-        onClosePane={() =>
-          focusedPane != null &&
-          tmuxCommand(tab.id, `kill-pane -t %${focusedPane}`).catch(() => {})
-        }
+        onSplitH={() => {
+          const t = focusedPane != null ? ` -t %${focusedPane}` : "";
+          tmuxCommand(tab.id, `split-window -h${t}`).catch(() => {});
+        }}
+        onSplitV={() => {
+          const t = focusedPane != null ? ` -t %${focusedPane}` : "";
+          tmuxCommand(tab.id, `split-window -v${t}`).catch(() => {});
+        }}
+        onClosePane={() => {
+          const t = focusedPane != null ? ` -t %${focusedPane}` : "";
+          userClosingRef.current = Date.now();
+          tmuxCommand(tab.id, `kill-pane${t}`).catch(() => {});
+        }}
       />
       <div ref={containerRef} className="relative min-h-0 flex-1">
         {windows.length === 0 && (
@@ -289,6 +298,7 @@ interface PaneTerminalProps {
 function PaneTerminal({
   tabId,
   paneId,
+  rect,
   paneTermsRef,
   pendingOutputRef,
   cellSizeRef,
@@ -315,14 +325,9 @@ function PaneTerminal({
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(el);
-    try {
-      fit.fit();
-    } catch {
-      /* noop */
-    }
-    paneTermsRef.current.set(paneId, { term, fit, el });
-
-    // Measure the real cell size once for the whole-viewport resize math.
+    // Measure the real cell size once (for the viewport → client-size math) — but
+    // do NOT fit-to-pixels: the pane grid must equal tmux's pane size, otherwise
+    // full-screen TUIs (htop) and the cursor end up misaligned.
     try {
       const prop = fit.proposeDimensions();
       if (prop && prop.cols > 0 && prop.rows > 0 && el.offsetWidth && el.offsetHeight) {
@@ -331,6 +336,15 @@ function PaneTerminal({
     } catch {
       /* noop */
     }
+    // Size the grid to tmux's exact pane cell dims.
+    if (rect.w > 0 && rect.h > 0) {
+      try {
+        term.resize(rect.w, rect.h);
+      } catch {
+        /* noop */
+      }
+    }
+    paneTermsRef.current.set(paneId, { term, fit, el });
 
     // Flush any output buffered before this pane's xterm existed.
     const pending = pendingOutputRef.current.get(paneId);
@@ -343,18 +357,7 @@ function PaneTerminal({
       tmuxInput(tabId, paneId, d).catch(() => {});
     });
 
-    const ro = new ResizeObserver(() => {
-      if (!el.offsetWidth || !el.offsetHeight) return;
-      try {
-        fit.fit();
-      } catch {
-        /* noop */
-      }
-    });
-    ro.observe(el);
-
     return () => {
-      ro.disconnect();
       onData.dispose();
       if (paneTermsRef.current.get(paneId)?.term === term) paneTermsRef.current.delete(paneId);
       try {
@@ -372,13 +375,20 @@ function PaneTerminal({
     if (!entry) return;
     entry.term.options.theme = themeById(themeId);
     entry.term.options.fontFamily = fontFamilyCss(fontId);
-    try {
-      entry.fit.fit();
-    } catch {
-      /* noop */
-    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [themeId, fontId]);
+
+  // Keep the grid matched to tmux's pane size on every layout change.
+  useEffect(() => {
+    const entry = paneTermsRef.current.get(paneId);
+    if (entry && rect.w > 0 && rect.h > 0) {
+      try {
+        entry.term.resize(rect.w, rect.h);
+      } catch {
+        /* noop */
+      }
+    }
+  }, [rect.w, rect.h, paneId, paneTermsRef]);
 
   // Pull keyboard focus into this pane's xterm when it becomes focused.
   useEffect(() => {
