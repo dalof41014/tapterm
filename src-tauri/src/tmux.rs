@@ -130,6 +130,9 @@ impl TmuxManager {
             .await?;
         channel.request_shell(true).await?;
 
+        let init_cols = params.cols;
+        let init_rows = params.rows;
+
         let (tx, mut rx) = mpsc::unbounded_channel::<TmuxCmd>();
         self.sessions.lock().await.insert(id.clone(), tx);
         let sessions = self.sessions.clone();
@@ -144,6 +147,25 @@ impl TmuxManager {
             let _ = channel
                 .data(format!("tmux -CC new -A -s {session}\n").as_bytes())
                 .await;
+
+            // 1b. Session setup (each line is a control command -> one %begin/%end
+            //     block, so each gets a Pending::Generic that the FIFO discards):
+            //       * `status off`         — tmux's own status line is never sent as
+            //         %output; turning it off frees the bottom cell-row (we render
+            //         our own window bar).
+            //       * `aggressive-resize`  — size each window to the client viewing
+            //         it, not the session minimum, avoiding smallest-client clamps.
+            //       * `refresh-client -C`  — a -CC client does not influence window
+            //         size until one is sent; seed it from the open() cols/rows so
+            //         panes fill the viewport before the first frontend resize.
+            for line in [
+                "set -g status off".to_string(),
+                "set -g aggressive-resize on".to_string(),
+                format!("refresh-client -C {init_cols}x{init_rows}"),
+            ] {
+                let _ = channel.data(format!("{line}\n").as_bytes()).await;
+                parser.pending.push_back(Pending::Generic);
+            }
 
             loop {
                 tokio::select! {
@@ -281,6 +303,7 @@ enum Pending {
     Generic,
     ListWindows,
     Capture(u32),
+    Cursor(u32),
 }
 
 #[derive(Default)]
@@ -293,7 +316,7 @@ struct ParserOut {
 struct Parser {
     buf: Vec<u8>,                              // line accumulator
     pending: VecDeque<Pending>,                // FIFO; pushed by the loop after each write
-    collecting: Option<(Pending, Vec<String>)>, // active %begin..%end block
+    collecting: Option<(Pending, u64, Vec<String>)>, // active block: (pending, %begin number, body)
     bootstrapped: bool,
     active: Option<u32>,                       // tmux's active window id
     windows: BTreeMap<u32, String>,            // window id -> name
@@ -352,23 +375,38 @@ impl Parser {
         }
 
         if self.collecting.is_some() {
-            if s.starts_with("%end") {
-                let (pend, body) = self.collecting.take().unwrap();
-                self.dispatch_block(pend, body, out);
-            } else if s.starts_with("%error") {
-                let (_pend, body) = self.collecting.take().unwrap();
-                let message = if body.is_empty() {
-                    s.strip_prefix("%error").unwrap_or(s).trim().to_string()
-                } else {
-                    body.join("\n")
-                };
-                out.emits.push(Emit::Error(ErrorEvt { message }));
-            } else if let Some((_, body)) = self.collecting.as_mut() {
+            let is_end = s.starts_with("%end");
+            let is_error = s.starts_with("%error");
+            if is_end || is_error {
+                // `%end`/`%error` carry the originating `%begin`'s <number>; only
+                // close the block when it matches. This guards against a captured
+                // pane body that literally contains `%end`/`%error` (which would
+                // otherwise desync the pending FIFO and silently swallow later
+                // notifications).
+                let trailer_num = parse_block_number(s);
+                let begin_num = self.collecting.as_ref().map(|(_, n, _)| *n).unwrap_or(0);
+                if trailer_num == begin_num {
+                    let (pend, _n, body) = self.collecting.take().unwrap();
+                    if is_error {
+                        let message = if body.is_empty() {
+                            s.strip_prefix("%error").unwrap_or(s).trim().to_string()
+                        } else {
+                            body.join("\n")
+                        };
+                        out.emits.push(Emit::Error(ErrorEvt { message }));
+                    } else {
+                        self.dispatch_block(pend, body, out);
+                    }
+                } else if let Some((_, _, body)) = self.collecting.as_mut() {
+                    body.push(s.to_string());
+                }
+            } else if let Some((_, _, body)) = self.collecting.as_mut() {
                 body.push(s.to_string());
             }
         } else if s.starts_with("%begin") {
+            let num = parse_block_number(s);
             let pend = self.pending.pop_front().unwrap_or(Pending::Generic);
-            self.collecting = Some((pend, Vec::new()));
+            self.collecting = Some((pend, num, Vec::new()));
         } else if s.starts_with('%') {
             self.handle_notification(s, out);
         } else {
@@ -396,14 +434,17 @@ impl Parser {
                 }
             }
             "%layout-change" => {
-                // rest = "@<win> <layout> [<visible-layout> <flags>]"
+                // rest = "@<win> <window_layout> [<window_visible_layout> <flags>]"
                 let mut it2 = rest.splitn(2, ' ');
                 let win_tok = it2.next().unwrap_or("");
-                let layout = it2
-                    .next()
-                    .unwrap_or("")
-                    .split(' ')
-                    .next()
+                let toks: Vec<&str> = it2.next().unwrap_or("").split(' ').collect();
+                // Prefer the *visible* layout (2nd field): it accounts for zoom so a
+                // zoomed pane fills the window. Fall back to window_layout (1st
+                // field) for older tmux that omits the visible layout.
+                let layout = toks
+                    .get(1)
+                    .or(toks.first())
+                    .copied()
                     .unwrap_or("")
                     .to_string();
                 if let Some(win) = win_tok.strip_prefix('@').and_then(|s| s.parse::<u32>().ok()) {
@@ -415,29 +456,18 @@ impl Parser {
                     }));
                 }
             }
-            "%window-add" | "%unlinked-window-add" => {
-                out.sends.push(bootstrap_send());
-            }
-            "%window-close" => {
-                if let Some(win) = parse_at(rest) {
-                    self.windows.remove(&win);
-                    self.layouts.remove(&win);
-                    out.emits
-                        .push(Emit::Windows(self.windows_snapshot()));
-                }
-            }
-            "%window-renamed" => {
-                // rest = "@<win> <name>"
-                let mut it2 = rest.splitn(2, ' ');
-                let win_tok = it2.next().unwrap_or("");
-                let name = it2.next().unwrap_or("");
-                if let Some(win) = win_tok.strip_prefix('@').and_then(|s| s.parse::<u32>().ok()) {
-                    self.windows.insert(win, name.to_string());
-                    out.emits
-                        .push(Emit::Windows(self.windows_snapshot()));
-                }
-            }
-            "%session-changed" | "%sessions-changed" => {
+            // Every window-lifecycle notification re-bootstraps via `list-windows`,
+            // matching the robust `%window-add` path: list-windows is ground truth
+            // (id, name, active flag, layout), so the switcher, the active-window
+            // highlight, and the keep-mounted set always converge — no stale active
+            // window and no missed close. `%layout-change` above stays the fast
+            // within-window incremental path so close-pane updates immediately.
+            "%window-add" | "%unlinked-window-add"
+            | "%window-close" | "%unlinked-window-close"
+            | "%window-renamed"
+            | "%window-pane-changed"
+            | "%session-window-changed"
+            | "%session-changed" | "%sessions-changed" => {
                 out.sends.push(bootstrap_send());
             }
             "%exit" | "%client-detached" => {
@@ -452,13 +482,36 @@ impl Parser {
         match pend {
             Pending::Generic => { /* discard */ }
             Pending::Capture(pane) => {
-                // capture-pane output is NOT octal-escaped; pass raw + one trailing \n.
-                let mut data = body.join("\n").into_bytes();
-                data.push(b'\n');
+                // The capture is taken with `-C`, so the body is octal-escaped just
+                // like %output — decode it (makes embedded ESC/`%` safe). Rows have
+                // no carriage return, so join with CRLF; a bare LF would leave xterm
+                // at the previous row's column and staircase the text.
+                let joined = body.join("\r\n");
+                let mut data = decode_tmux_output(&joined);
+                data.extend_from_slice(b"\r\n");
                 out.emits.push(Emit::Output(OutputEvt {
                     pane,
                     data: String::from_utf8_lossy(&data).to_string(),
                 }));
+            }
+            Pending::Cursor(pane) => {
+                // Response body: "<cursor_x>,<cursor_y>,<cursor_flag>". Re-emit an
+                // absolute cursor move (+ visibility) after the seed so a static
+                // prompt lands where tmux actually has the cursor instead of at the
+                // bottom of the captured screen.
+                if let Some(line) = body.first() {
+                    let nums: Vec<&str> = line.trim().split(',').collect();
+                    if let (Some(x), Some(y)) = (
+                        nums.first().and_then(|s| s.parse::<u32>().ok()),
+                        nums.get(1).and_then(|s| s.parse::<u32>().ok()),
+                    ) {
+                        let visible = nums.get(2).map(|s| *s != "0").unwrap_or(true);
+                        // 1-based, row;col (tmux cursor_x/cursor_y are 0-based).
+                        let mut seq = format!("\u{1b}[{};{}H", y + 1, x + 1);
+                        seq.push_str(if visible { "\u{1b}[?25h" } else { "\u{1b}[?25l" });
+                        out.emits.push(Emit::Output(OutputEvt { pane, data: seq }));
+                    }
+                }
             }
             Pending::ListWindows => {
                 for line in &body {
@@ -512,18 +565,28 @@ impl Parser {
     fn seed_panes_from_layout(&mut self, layout: &str, out: &mut ParserOut) {
         for pane in leaf_pane_ids(layout) {
             if self.known_panes.insert(pane) {
+                // `-C` octal-escapes the capture (mirrors %output, decoded on
+                // dispatch); drop `-J` so wrapped lines keep the live row count.
                 out.sends.push((
-                    format!("capture-pane -p -e -J -t %{pane}"),
+                    format!("capture-pane -p -e -C -t %{pane}"),
                     Pending::Capture(pane),
+                ));
+                // Follow the seed with the real cursor position so a static prompt
+                // lands correctly (see Pending::Cursor dispatch). Enqueued after the
+                // capture so it is applied on top of the seeded screen.
+                out.sends.push((
+                    format!("display-message -p -t %{pane} '#{{cursor_x}},#{{cursor_y}},#{{cursor_flag}}'"),
+                    Pending::Cursor(pane),
                 ));
             }
         }
     }
 }
 
-/// First whitespace-delimited token of `s`, parsed as `@<u32>`.
-fn parse_at(s: &str) -> Option<u32> {
-    s.split(' ').next()?.strip_prefix('@')?.parse().ok()
+/// The `<number>` field of a `%begin`/`%end`/`%error` line:
+/// `%<kind> <time> <number> <flags>`. Returns 0 if absent/unparseable.
+fn parse_block_number(s: &str) -> u64 {
+    s.split(' ').nth(2).and_then(|t| t.parse().ok()).unwrap_or(0)
 }
 
 // ---- layout leaf-pane extraction ---------------------------------------------

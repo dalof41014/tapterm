@@ -23,7 +23,7 @@ import { useStore, type Tab } from "../store/useStore";
 import { themeById } from "../lib/themes";
 import { fontFamilyCss } from "../lib/fonts";
 import { SplitPane } from "./SplitPane";
-import { parseLayout, type LayoutNode, type PaneRect, type TmuxWindow } from "../lib/tmuxLayout";
+import { collectPanes, parseLayout, type LayoutNode, type PaneRect, type TmuxWindow } from "../lib/tmuxLayout";
 
 interface PaneEntry {
   term: Terminal;
@@ -42,7 +42,11 @@ export function TmuxView({ tab }: { tab: Tab }) {
   const pendingOutputRef = useRef<Map<number, string[]>>(new Map());
   const cellSizeRef = useRef<{ w: number; h: number }>({ w: EST_CELL_W, h: EST_CELL_H });
   const lastDimsRef = useRef<{ cols: number; rows: number }>({ cols: 0, rows: 0 });
-  const userClosingRef = useRef(0); // timestamp of a user-initiated kill-pane
+  // Set deterministically when the user issues a kill that will end the session
+  // (the last pane, or the last window) so the resulting channel drop closes the
+  // tab instead of auto-reattaching into a freshly recreated session. Cleared
+  // when a windows snapshot shows survivors or on error.
+  const expectingCloseRef = useRef(false);
 
   const setTabStatus = useStore((s) => s.setTabStatus);
   const closeTab = useStore((s) => s.closeTab);
@@ -55,6 +59,9 @@ export function TmuxView({ tab }: { tab: Tab }) {
   const [selectedWindow, setSelectedWindow] = useState<number | null>(null);
   const [layouts, setLayouts] = useState<Record<number, LayoutNode>>({});
   const [focusedPane, setFocusedPane] = useState<number | null>(null);
+  // Measured cell pixel size as STATE (mirrors cellSizeRef) so the split tree
+  // re-renders its pixel-exact slots when the true cell box is measured.
+  const [cellSize, setCellSize] = useState<{ w: number; h: number }>({ w: EST_CELL_W, h: EST_CELL_H });
 
   // Report the real client size to tmux (cols×rows from the container box and the
   // MEASURED cell size). Called again once a pane measures the true cell size, so
@@ -63,12 +70,25 @@ export function TmuxView({ tab }: { tab: Tab }) {
     const b = containerRef.current;
     if (!b || !b.offsetWidth || !b.offsetHeight) return;
     const { w, h } = cellSizeRef.current;
-    const c = Math.max(2, Math.round(b.offsetWidth / w));
-    const r = Math.max(2, Math.round(b.offsetHeight / h));
+    // floor (not round): guarantees cols*cellW <= box so the grid fits inside the
+    // viewport and tmux never tiles wider/taller than we can show (canonical model).
+    const c = Math.max(2, Math.floor(b.offsetWidth / w));
+    const r = Math.max(2, Math.floor(b.offsetHeight / h));
     if (c === lastDimsRef.current.cols && r === lastDimsRef.current.rows) return;
     lastDimsRef.current = { cols: c, rows: r };
     tmuxResize(tab.id, c, r).catch(() => {});
   }, [tab.id]);
+
+  // A visible pane measured the true cell box → mirror it into state (re-renders
+  // the pixel-exact slots) and re-report the client size to tmux so it relays out
+  // to fill the viewport instead of the bootstrap estimate.
+  const handleMeasured = useCallback(() => {
+    const { w, h } = cellSizeRef.current;
+    setCellSize((prev) =>
+      Math.abs(prev.w - w) < 0.01 && Math.abs(prev.h - h) < 0.01 ? prev : { w, h },
+    );
+    syncClientSize();
+  }, [syncClientSize]);
 
   useEffect(() => {
     let disposed = false;
@@ -84,8 +104,8 @@ export function TmuxView({ tab }: { tab: Tab }) {
       if (b && b.offsetWidth && b.offsetHeight) {
         const { w, h } = cellSizeRef.current;
         return {
-          cols: Math.max(2, Math.round(b.offsetWidth / w)),
-          rows: Math.max(2, Math.round(b.offsetHeight / h)),
+          cols: Math.max(2, Math.floor(b.offsetWidth / w)),
+          rows: Math.max(2, Math.floor(b.offsetHeight / h)),
         };
       }
       return { cols: 80, rows: 24 };
@@ -95,7 +115,11 @@ export function TmuxView({ tab }: { tab: Tab }) {
       connectedThisTry = false;
       openedAt = Date.now();
       const { cols, rows } = computeDims();
-      lastDimsRef.current = { cols, rows };
+      // Reset (don't pre-seed measured dims): the first real syncClientSize after
+      // a pane measures the true cell box must always fire its refresh-client -C,
+      // otherwise a matching rounded estimate would suppress it and the window
+      // would keep tmux's default size. (BE also sends an initial refresh-client.)
+      lastDimsRef.current = { cols: 0, rows: 0 };
       tmuxOpen(tab.id, tab.hostId, cols, rows, tab.tmuxSession ?? "tapterm-cc").catch((err) => {
         if (!disposed) onClosed(String(err));
       });
@@ -106,9 +130,11 @@ export function TmuxView({ tab }: { tab: Tab }) {
     // exits (e.g. tmux not installed) accumulate and eventually give up.
     const onClosed = (errMsg?: string) => {
       if (disposed) return;
-      // The user just killed the last pane → the session ended on purpose; close
-      // the tab instead of auto-reattaching into a freshly recreated session.
-      if (Date.now() - userClosingRef.current < 2500) {
+      // The user just killed the last pane/window → the session ended on purpose;
+      // close the tab instead of auto-reattaching into a freshly recreated
+      // session. Deterministic (a per-kill intent flag), not a wall-clock guard.
+      if (expectingCloseRef.current) {
+        expectingCloseRef.current = false;
         closeTab(tab.id);
         return;
       }
@@ -152,6 +178,9 @@ export function TmuxView({ tab }: { tab: Tab }) {
         `tmux://windows/${tab.id}`,
         (e) => {
           const ws = e.payload.windows;
+          // Survivors exist → whatever the user killed was not the last window;
+          // cancel any pending close-tab intent so a later drop just reattaches.
+          if (ws.length > 0) expectingCloseRef.current = false;
           setWindows(ws);
           setSelectedWindow((cur) => {
             if (cur != null && ws.some((w) => w.id === cur)) return cur;
@@ -174,14 +203,25 @@ export function TmuxView({ tab }: { tab: Tab }) {
         },
       );
       const uClosed = await listen(`tmux://closed/${tab.id}`, () => onClosed());
+      // A rejected kill-window/kill-pane (stale @/% target, already gone) emits a
+      // %error block → surface it instead of letting the button "do nothing". A
+      // failed kill also voids any close-tab intent.
+      const uError = await listen<{ message: string }>(
+        `tmux://error/${tab.id}`,
+        (e) => {
+          expectingCloseRef.current = false;
+          setTabStatus(tab.id, "error", e.payload.message);
+        },
+      );
       if (disposed) {
         uOutput();
         uWindows();
         uLayout();
         uClosed();
+        uError();
         return;
       }
-      unlisteners.push(uOutput, uWindows, uLayout, uClosed);
+      unlisteners.push(uOutput, uWindows, uLayout, uClosed, uError);
     })();
 
     connect();
@@ -224,41 +264,143 @@ export function TmuxView({ tab }: { tab: Tab }) {
         cellSizeRef={cellSizeRef}
         focused={focusedPane === paneId}
         onFocus={() => setFocusedPane(paneId)}
-        onMeasured={syncClientSize}
+        onMeasured={handleMeasured}
         themeId={themeId}
         fontId={resolvedFont}
       />
     ),
-    [tab.id, focusedPane, themeId, resolvedFont, syncClientSize],
+    [tab.id, focusedPane, themeId, resolvedFont, handleMeasured],
   );
+
+  // Resolve a concrete pane target: the focused pane, else the first leaf of the
+  // selected window. Never issue kill-pane/split-window with an empty -t (which
+  // would hit the server's active pane — possibly in a different window).
+  const resolvePaneTarget = useCallback((): number | null => {
+    if (focusedPane != null) return focusedPane;
+    if (selectedWindow != null) {
+      const tree = layouts[selectedWindow];
+      if (tree) {
+        const panes = collectPanes(tree);
+        if (panes.length) return panes[0];
+      }
+    }
+    return null;
+  }, [focusedPane, selectedWindow, layouts]);
+
+  // Would this kind of kill destroy the whole tapterm-cc session (→ close tab)?
+  const willCloseTab = useCallback(
+    (scope: "pane" | "window"): boolean => {
+      if (windows.length > 1) return false; // other windows survive
+      if (scope === "window") return true; // killing the only window
+      if (selectedWindow == null) return false;
+      const tree = layouts[selectedWindow];
+      return tree ? collectPanes(tree).length <= 1 : false; // last pane of last window
+    },
+    [windows, selectedWindow, layouts],
+  );
+
+  // Structural commands (native UI drives tmux; in control mode there is no
+  // prefix/key-table — see PaneTerminal). Shared by the switcher bar and the
+  // keyboard accelerators below.
+  const newWindow = useCallback(() => {
+    tmuxCommand(tab.id, "new-window").catch(() => {});
+  }, [tab.id]);
+
+  const splitPane = useCallback(
+    (dir: "h" | "v") => {
+      const target = resolvePaneTarget();
+      const t = target != null ? ` -t %${target}` : "";
+      tmuxCommand(tab.id, `split-window -${dir}${t}`).catch(() => {});
+    },
+    [tab.id, resolvePaneTarget],
+  );
+
+  const closePane = useCallback(() => {
+    const target = resolvePaneTarget();
+    if (target == null) return; // nothing focused/known — don't kill a stray pane
+    if (willCloseTab("pane")) expectingCloseRef.current = true;
+    tmuxCommand(tab.id, `kill-pane -t %${target}`).catch(() => {});
+  }, [tab.id, resolvePaneTarget, willCloseTab]);
+
+  const closeWindow = useCallback(
+    (w: number) => {
+      if (willCloseTab("window")) expectingCloseRef.current = true;
+      tmuxCommand(tab.id, `kill-window -t @${w}`).catch(() => {});
+    },
+    [tab.id, willCloseTab],
+  );
+
+  const selectWindow = useCallback(
+    (w: number) => {
+      setSelectedWindow(w);
+      tmuxCommand(tab.id, `select-window -t @${w}`).catch(() => {});
+    },
+    [tab.id],
+  );
+
+  // Reconcile focus against the live layout: after a pane is killed (or on a
+  // window switch) drop a dangling focusedPane so the ring + split/close targets
+  // never point at a gone pane.
+  useEffect(() => {
+    if (selectedWindow == null) return;
+    const tree = layouts[selectedWindow];
+    if (!tree) return;
+    const panes = collectPanes(tree);
+    if (!panes.length) return;
+    setFocusedPane((cur) => (cur != null && panes.includes(cur) ? cur : panes[0]));
+  }, [layouts, selectedWindow]);
+
+  // Native GUI accelerators (capture phase, never forwarded to the pane) that
+  // issue the same structural commands. Platform-aware modifiers that DON'T
+  // collide with terminal usage: Cmd on macOS; Ctrl+Shift elsewhere (plain
+  // Ctrl+letter is reserved for the shell, e.g. Ctrl-D = EOF, Ctrl-W = kill-word).
+  useEffect(() => {
+    const box = containerRef.current;
+    if (!box) return;
+    const isMac = /mac/i.test(navigator.userAgent);
+    const onKey = (e: KeyboardEvent) => {
+      const accel = isMac
+        ? e.metaKey && !e.ctrlKey && !e.altKey
+        : e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey;
+      if (!accel) return;
+      switch (e.key.toLowerCase()) {
+        case "t":
+          e.preventDefault();
+          e.stopPropagation();
+          newWindow();
+          break;
+        case "d":
+          e.preventDefault();
+          e.stopPropagation();
+          splitPane("h");
+          break;
+        case "e":
+          e.preventDefault();
+          e.stopPropagation();
+          splitPane("v");
+          break;
+        case "w":
+          e.preventDefault();
+          e.stopPropagation();
+          closePane();
+          break;
+      }
+    };
+    box.addEventListener("keydown", onKey, true);
+    return () => box.removeEventListener("keydown", onKey, true);
+  }, [newWindow, splitPane, closePane]);
 
   return (
     <div className="flex h-full flex-col bg-[#0B1220]">
       <WindowSwitcherBar
         windows={windows}
         selected={selectedWindow}
-        onSelect={(w) => {
-          setSelectedWindow(w);
-          tmuxCommand(tab.id, `select-window -t @${w}`).catch(() => {});
-        }}
-        onCloseWindow={(w) => {
-          userClosingRef.current = Date.now();
-          tmuxCommand(tab.id, `kill-window -t @${w}`).catch(() => {});
-        }}
-        onNewWindow={() => tmuxCommand(tab.id, "new-window").catch(() => {})}
-        onSplitH={() => {
-          const t = focusedPane != null ? ` -t %${focusedPane}` : "";
-          tmuxCommand(tab.id, `split-window -h${t}`).catch(() => {});
-        }}
-        onSplitV={() => {
-          const t = focusedPane != null ? ` -t %${focusedPane}` : "";
-          tmuxCommand(tab.id, `split-window -v${t}`).catch(() => {});
-        }}
-        onClosePane={() => {
-          const t = focusedPane != null ? ` -t %${focusedPane}` : "";
-          userClosingRef.current = Date.now();
-          tmuxCommand(tab.id, `kill-pane${t}`).catch(() => {});
-        }}
+        onSelect={selectWindow}
+        onCloseWindow={closeWindow}
+        onNewWindow={newWindow}
+        onSplitH={() => splitPane("h")}
+        onSplitV={() => splitPane("v")}
+        onClosePane={closePane}
       />
       <div ref={containerRef} className="relative min-h-0 flex-1">
         {windows.length === 0 && (
@@ -270,13 +412,18 @@ export function TmuxView({ tab }: { tab: Tab }) {
           const wtree = layouts[w.id];
           if (!wtree) return null;
           return (
+            // The grid is sized to EXACTLY cols*cellW × rows*cellH (via SplitPane)
+            // and centered; the sub-cell remainder of the viewport is intentional
+            // dead margin (iTerm2 gray-area model), never stretched into the panes.
             <div
               key={w.id}
-              className="absolute inset-0"
-              style={{ display: w.id === selectedWindow ? "block" : "none" }}
+              className="absolute inset-0 flex items-center justify-center overflow-hidden"
+              style={{ display: w.id === selectedWindow ? "flex" : "none" }}
             >
               <SplitPane
                 node={wtree}
+                cellW={cellSize.w}
+                cellH={cellSize.h}
                 focusedPane={focusedPane}
                 onFocusPane={setFocusedPane}
                 renderLeaf={renderLeaf}
@@ -339,13 +486,28 @@ function PaneTerminal({
     term.open(el);
     // Measure the real cell size once (for the viewport → client-size math) — but
     // do NOT fit-to-pixels: the pane grid must equal tmux's pane size, otherwise
-    // full-screen TUIs (htop) and the cursor end up misaligned.
+    // full-screen TUIs (htop) and the cursor end up misaligned. Read the TRUE cell
+    // box from the render service of a VISIBLE pane (offsetWidth>0); a display:none
+    // window's pane has zero size and would yield a garbage cell. proposeDimensions
+    // is a fallback only — it pre-subtracts padding/scrollbar so its derived cell
+    // is slightly inflated, making the reported grid a few cells short.
     try {
-      const prop = fit.proposeDimensions();
-      if (prop && prop.cols > 0 && prop.rows > 0 && el.offsetWidth && el.offsetHeight) {
-        cellSizeRef.current = { w: el.offsetWidth / prop.cols, h: el.offsetHeight / prop.rows };
-        // tell the view the true cell size so it can re-report client size to tmux
-        onMeasured?.();
+      if (el.offsetWidth && el.offsetHeight) {
+        const cell = (
+          term as unknown as {
+            _core?: { _renderService?: { dimensions?: { css?: { cell?: { width: number; height: number } } } } };
+          }
+        )._core?._renderService?.dimensions?.css?.cell;
+        if (cell && cell.width > 0 && cell.height > 0) {
+          cellSizeRef.current = { w: cell.width, h: cell.height };
+          onMeasured?.();
+        } else {
+          const prop = fit.proposeDimensions();
+          if (prop && prop.cols > 0 && prop.rows > 0) {
+            cellSizeRef.current = { w: el.offsetWidth / prop.cols, h: el.offsetHeight / prop.rows };
+            onMeasured?.();
+          }
+        }
       }
     } catch {
       /* noop */
@@ -367,6 +529,12 @@ function PaneTerminal({
       pendingOutputRef.current.delete(paneId);
     }
 
+    // Keyboard model (control mode): a -CC client has no prefix/key-table, so
+    // "sending Ctrl-B to tmux" is meaningless. We PASS THROUGH every keystroke as
+    // bytes to the focused pane via send-keys -H (the program in the pane receives
+    // Ctrl-B/Ctrl-D/etc. directly). tmux is driven STRUCTURALLY via control
+    // commands from the switcher bar / native accelerators (see TmuxView), never
+    // by forwarding a prefix.
     const onData = term.onData((d) => {
       tmuxInput(tabId, paneId, d).catch(() => {});
     });

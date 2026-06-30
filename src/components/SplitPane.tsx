@@ -1,12 +1,17 @@
 // Recursive split-pane renderer for the tmux MVP (net-new, Split agent).
 //
-// Renders a parsed tmux LayoutNode tree as nested flex containers whose child
-// proportions follow tmux's cell ratios, with draggable dividers (pointer
-// events) between siblings. Leaves are positioned slots into which the caller's
-// renderLeaf(paneId, rect) is mounted (TmuxView mounts an xterm there).
+// Renders a parsed tmux LayoutNode tree as nested flex containers. Every slot is
+// sized in EXACT PIXELS = cells × cellPx (Model B from the integration guide), so
+// each pane's DOM slot equals the intrinsic pixel size of its xterm (cols*cellW ×
+// rows*cellH). This is what makes panes tile with no internal black margin and
+// keeps full-screen TUIs aligned — flex *proportions* could never do that, since
+// pane pixels (cells) and slot pixels (container fraction) come from different
+// bases. tmux reserves exactly one cell per divider between siblings (child cells
+// sum to parent − (n−1)); we mirror that by giving each divider a 1-cell slot, so
+// the children + dividers sum exactly to the parent's cols*cellW / rows*cellH.
 //
-// Style: app Tailwind tokens — borders/dividers use the `line` color, focus ring
-// uses `accent`.
+// Style: app Tailwind tokens — dividers use the `line` color, focus ring uses
+// `accent`.
 
 import { Fragment, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
@@ -15,6 +20,9 @@ import { collectPanes, type LayoutNode, type PaneRect } from "../lib/tmuxLayout"
 
 export interface SplitPaneProps {
   node: LayoutNode;
+  /** Measured cell pixel size; the whole tree is laid out in cells × these. */
+  cellW: number;
+  cellH: number;
   focusedPane: number | null;
   onFocusPane: (pane: number) => void;
   renderLeaf: (paneId: number, rect: PaneRect) => ReactNode;
@@ -29,18 +37,20 @@ function firstPaneId(node: LayoutNode): number | null {
 }
 
 export function SplitPane(props: SplitPaneProps): JSX.Element {
-  const { node, focusedPane, onFocusPane, renderLeaf } = props;
+  const { node, cellW, cellH, focusedPane, onFocusPane, renderLeaf } = props;
 
-  // Leaf: a filled, focusable slot hosting the caller's renderLeaf output.
+  // Leaf: a fixed-size slot (cells × cellPx) hosting the caller's renderLeaf
+  // output. The xterm inside resizes to the same cells, so it fills exactly.
   if (node.dir === null) {
     const id = node.paneId!;
     const focused = focusedPane === id;
     return (
       <div
         className={clsx(
-          "relative h-full w-full overflow-hidden",
+          "relative shrink-0 overflow-hidden",
           focused && "z-10 ring-1 ring-inset ring-accent",
         )}
+        style={{ width: node.w * cellW, height: node.h * cellH }}
         onMouseDown={() => onFocusPane(id)}
       >
         {renderLeaf(id, { x: node.x, y: node.y, w: node.w, h: node.h })}
@@ -61,13 +71,15 @@ interface DragState {
 }
 
 function SplitContainer(props: SplitPaneProps): JSX.Element {
-  const { node, onResizePane } = props;
+  const { node, cellW, cellH, onResizePane } = props;
   const children = node.children ?? [];
   const isRow = node.dir === "lr";
+  const cellPx = isRow ? cellW : cellH; // active-axis cell size
   const containerRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<DragState | null>(null);
 
-  // Base grow values come straight from tmux cell sizes on the active axis.
+  // Base grow values come straight from tmux cell sizes on the active axis. They
+  // double as the per-child cell counts that drive each slot's pixel flex-basis.
   const base = children.map((c) => (isRow ? c.w : c.h));
   const baseSig = `${node.dir}|${base.join(":")}`;
 
@@ -135,26 +147,40 @@ function SplitContainer(props: SplitPaneProps): JSX.Element {
   return (
     <div
       ref={containerRef}
-      className={clsx("flex h-full w-full", isRow ? "flex-row" : "flex-col")}
+      className={clsx("flex shrink-0", isRow ? "flex-row" : "flex-col")}
+      style={{ width: node.w * cellW, height: node.h * cellH }}
     >
       {children.map((child, i) => (
         <Fragment key={i}>
+          {/* Pixel-exact slot: cells × cellPx. flexGrow/Shrink 0 so it never
+              stretches past the xterm's intrinsic size (the black-margin bug). */}
           <div
             className="relative overflow-hidden"
-            style={{ flexGrow: grows[i], flexBasis: 0, minWidth: 0, minHeight: 0 }}
+            style={{ flexGrow: 0, flexShrink: 0, flexBasis: grows[i] * cellPx }}
           >
             <SplitPane {...props} node={child} />
           </div>
           {i < children.length - 1 && (
+            // Divider occupies the single cell tmux reserves between siblings, so
+            // the slots + dividers sum exactly to the parent grid. The thin line
+            // is centered inside that cell; the whole cell is the drag hit-target.
             <div
               className={clsx(
-                "relative z-10 shrink-0 select-none touch-none bg-line transition-colors hover:bg-accent",
-                isRow ? "w-1 cursor-col-resize" : "h-1 cursor-row-resize",
+                "group relative z-10 flex shrink-0 select-none touch-none items-center justify-center",
+                isRow ? "cursor-col-resize" : "cursor-row-resize",
               )}
+              style={{ flexGrow: 0, flexShrink: 0, flexBasis: cellPx }}
               onPointerDown={onDividerDown(i)}
               onPointerMove={onDividerMove}
               onPointerUp={onDividerUp}
-            />
+            >
+              <div
+                className={clsx(
+                  "bg-line transition-colors group-hover:bg-accent",
+                  isRow ? "h-full w-px" : "h-px w-full",
+                )}
+              />
+            </div>
           )}
         </Fragment>
       ))}
