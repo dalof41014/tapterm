@@ -474,12 +474,12 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         </h3>
         <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-xs">
           {[
-            ["Toggle sidebar", "Ctrl/⌘ B"],
-            ["Quick switch session", "Ctrl/⌘ P"],
-            ["New local terminal", "Ctrl/⌘ T"],
+            ["Toggle sidebar", "Ctrl Shift / ⌘ B"],
+            ["Quick switch session", "Ctrl Shift / ⌘ P"],
+            ["New local terminal", "Ctrl Shift / ⌘ T"],
+            ["Close tab", "Ctrl Shift / ⌘ W"],
             ["Switch to tab 1–9", "Ctrl/⌘ 1–9"],
-            ["Next / prev tab", "Ctrl/⌘ (Shift) Tab"],
-            ["Close tab", "Ctrl/⌘ Shift W"],
+            ["Next / prev tab", "Ctrl (Shift) Tab"],
             ["Settings", "Ctrl/⌘ ,"],
             ["Copy / paste (terminal)", "Ctrl/⌘ Shift C / V"],
             ["Find in terminal", "Ctrl/⌘ F"],
@@ -492,6 +492,10 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
             </div>
           ))}
         </div>
+        <p className="mt-3 text-[11px] text-content-faint">
+          When a terminal is focused, plain Ctrl keys pass straight through — so the
+          tmux prefix (Ctrl-B) and shell shortcuts (Ctrl-A/E/U/R…) work normally.
+        </p>
       </section>
     </Modal>
   );

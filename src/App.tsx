@@ -55,13 +55,16 @@ export default function App() {
       const s = useStore.getState();
       const k = e.key.toLowerCase();
       let handled = true;
-      if (k === "b") s.toggleSidebar();
-      else if (k === "t" && !e.shiftKey) s.openLocal();
-      else if (k === "p" && !e.shiftKey) s.setQuickOpen(true);
-      else if (k === ",") s.setSettingsOpen(!s.settingsOpen);
-      else if (k === "w" && e.shiftKey) {
+      // Letter shortcuts require Cmd (mac) or Ctrl+Shift, so plain Ctrl+<letter>
+      // (tmux prefix Ctrl-B, shell Ctrl-A/E/U/R…) passes straight to the terminal.
+      const letterMod = e.metaKey || e.shiftKey;
+      if (k === "b" && letterMod) s.toggleSidebar();
+      else if (k === "t" && letterMod) s.openLocal();
+      else if (k === "p" && letterMod) s.setQuickOpen(true);
+      else if (k === "w" && letterMod) {
         if (s.activeTabId) s.closeTab(s.activeTabId);
-      } else if (k === "tab") {
+      } else if (k === ",") s.setSettingsOpen(!s.settingsOpen);
+      else if (k === "tab") {
         const { tabs, activeTabId } = s;
         if (tabs.length) {
           const i = tabs.findIndex((t) => t.id === activeTabId);
