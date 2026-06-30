@@ -56,6 +56,20 @@ export function TmuxView({ tab }: { tab: Tab }) {
   const [layouts, setLayouts] = useState<Record<number, LayoutNode>>({});
   const [focusedPane, setFocusedPane] = useState<number | null>(null);
 
+  // Report the real client size to tmux (cols×rows from the container box and the
+  // MEASURED cell size). Called again once a pane measures the true cell size, so
+  // tmux relays out to actually fill the viewport instead of an estimate.
+  const syncClientSize = useCallback(() => {
+    const b = containerRef.current;
+    if (!b || !b.offsetWidth || !b.offsetHeight) return;
+    const { w, h } = cellSizeRef.current;
+    const c = Math.max(2, Math.round(b.offsetWidth / w));
+    const r = Math.max(2, Math.round(b.offsetHeight / h));
+    if (c === lastDimsRef.current.cols && r === lastDimsRef.current.rows) return;
+    lastDimsRef.current = { cols: c, rows: r };
+    tmuxResize(tab.id, c, r).catch(() => {});
+  }, [tab.id]);
+
   useEffect(() => {
     let disposed = false;
     let attempts = 0;
@@ -176,16 +190,7 @@ export function TmuxView({ tab }: { tab: Tab }) {
     const box = containerRef.current;
     let ro: ResizeObserver | undefined;
     if (box) {
-      ro = new ResizeObserver(() => {
-        const b = containerRef.current;
-        if (!b || !b.offsetWidth || !b.offsetHeight) return; // hidden-tab guard
-        const { w, h } = cellSizeRef.current;
-        const c = Math.max(2, Math.round(b.offsetWidth / w));
-        const r = Math.max(2, Math.round(b.offsetHeight / h));
-        if (c === lastDimsRef.current.cols && r === lastDimsRef.current.rows) return;
-        lastDimsRef.current = { cols: c, rows: r };
-        tmuxResize(tab.id, c, r).catch(() => {});
-      });
+      ro = new ResizeObserver(() => syncClientSize());
       ro.observe(box);
     }
 
@@ -219,11 +224,12 @@ export function TmuxView({ tab }: { tab: Tab }) {
         cellSizeRef={cellSizeRef}
         focused={focusedPane === paneId}
         onFocus={() => setFocusedPane(paneId)}
+        onMeasured={syncClientSize}
         themeId={themeId}
         fontId={resolvedFont}
       />
     ),
-    [tab.id, focusedPane, themeId, resolvedFont],
+    [tab.id, focusedPane, themeId, resolvedFont, syncClientSize],
   );
 
   return (
@@ -234,6 +240,10 @@ export function TmuxView({ tab }: { tab: Tab }) {
         onSelect={(w) => {
           setSelectedWindow(w);
           tmuxCommand(tab.id, `select-window -t @${w}`).catch(() => {});
+        }}
+        onCloseWindow={(w) => {
+          userClosingRef.current = Date.now();
+          tmuxCommand(tab.id, `kill-window -t @${w}`).catch(() => {});
         }}
         onNewWindow={() => tmuxCommand(tab.id, "new-window").catch(() => {})}
         onSplitH={() => {
@@ -291,6 +301,7 @@ interface PaneTerminalProps {
   cellSizeRef: React.MutableRefObject<{ w: number; h: number }>;
   focused: boolean;
   onFocus: () => void;
+  onMeasured?: () => void;
   themeId: string;
   fontId: string;
 }
@@ -304,6 +315,7 @@ function PaneTerminal({
   cellSizeRef,
   focused,
   onFocus,
+  onMeasured,
   themeId,
   fontId,
 }: PaneTerminalProps) {
@@ -332,6 +344,8 @@ function PaneTerminal({
       const prop = fit.proposeDimensions();
       if (prop && prop.cols > 0 && prop.rows > 0 && el.offsetWidth && el.offsetHeight) {
         cellSizeRef.current = { w: el.offsetWidth / prop.cols, h: el.offsetHeight / prop.rows };
+        // tell the view the true cell size so it can re-report client size to tmux
+        onMeasured?.();
       }
     } catch {
       /* noop */
@@ -402,6 +416,7 @@ interface WindowSwitcherBarProps {
   windows: TmuxWindow[];
   selected: number | null;
   onSelect: (w: number) => void;
+  onCloseWindow: (w: number) => void;
   onNewWindow: () => void;
   onSplitH: () => void;
   onSplitV: () => void;
@@ -412,6 +427,7 @@ function WindowSwitcherBar({
   windows,
   selected,
   onSelect,
+  onCloseWindow,
   onNewWindow,
   onSplitH,
   onSplitV,
@@ -421,18 +437,29 @@ function WindowSwitcherBar({
     <div className="flex h-9 shrink-0 items-center gap-1 border-b border-line bg-bg-raised px-2">
       <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
         {windows.map((w) => (
-          <button
+          <div
             key={w.id}
-            onClick={() => onSelect(w.id)}
-            className={`shrink-0 rounded-md px-2 py-1 text-xs transition-colors ${
-              selected === w.id
-                ? "bg-accent-soft text-accent"
-                : "text-content-muted hover:bg-surface-hover hover:text-content"
+            className={`group/w flex shrink-0 items-center rounded-md transition-colors ${
+              selected === w.id ? "bg-accent-soft" : "hover:bg-surface-hover"
             }`}
-            title={`Window @${w.id}`}
           >
-            {w.name || `@${w.id}`}
-          </button>
+            <button
+              onClick={() => onSelect(w.id)}
+              className={`py-1 pl-2 pr-1 text-xs ${
+                selected === w.id ? "text-accent" : "text-content-muted group-hover/w:text-content"
+              }`}
+              title={`Window @${w.id}`}
+            >
+              {w.name || `@${w.id}`}
+            </button>
+            <button
+              onClick={() => onCloseWindow(w.id)}
+              title="Close window"
+              className="rounded p-0.5 pr-1 text-content-faint opacity-0 transition-opacity hover:text-danger group-hover/w:opacity-100"
+            >
+              <X size={11} />
+            </button>
+          </div>
         ))}
         <button
           className="btn-ghost shrink-0 p-1"
