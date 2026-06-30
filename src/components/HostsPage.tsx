@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { useStore } from "../store/useStore";
 import type { Group, Host } from "../lib/types";
+import { TMUX_ENABLED } from "../lib/flags";
 import { HostModal } from "./modals/HostModal";
 import { GroupModal } from "./modals/GroupModal";
 
@@ -26,6 +27,7 @@ function HostCard({
   onClick,
   onDragStart,
   onConnect,
+  onTmux,
   onEdit,
   onDuplicate,
   onDelete,
@@ -35,6 +37,7 @@ function HostCard({
   onClick: (e: React.MouseEvent) => void;
   onDragStart: (e: React.DragEvent) => void;
   onConnect: () => void;
+  onTmux?: () => void;
   onEdit: () => void;
   onDuplicate: () => void;
   onDelete: () => void;
@@ -87,6 +90,15 @@ function HostCard({
         >
           <Zap size={13} /> Connect
         </button>
+        {onTmux && (
+          <button
+            className="btn-ghost px-1.5 py-1 text-[10px] font-semibold uppercase tracking-wide"
+            title="Open in tmux (control mode)"
+            onClick={(e) => { e.stopPropagation(); onTmux(); }}
+          >
+            tmux
+          </button>
+        )}
         <button className="btn-ghost p-1.5" title="Edit" onClick={(e) => { e.stopPropagation(); onEdit(); }}>
           <Pencil size={14} />
         </button>
@@ -105,6 +117,7 @@ export function HostsPage() {
   const hosts = useStore((s) => s.vault.hosts);
   const groups = useStore((s) => s.vault.groups);
   const openHost = useStore((s) => s.openHost);
+  const openTmux = useStore((s) => s.openTmux);
   const setMainView = useStore((s) => s.setMainView);
   const duplicateHost = useStore((s) => s.duplicateHost);
   const deleteHost = useStore((s) => s.deleteHost);
@@ -193,6 +206,12 @@ export function HostsPage() {
     openHost(id);
     setMainView("terminals");
   };
+  const tmuxConnect = (id: string) => {
+    openTmux(id);
+    setMainView("terminals");
+  };
+  const tmuxProp = (h: Host) =>
+    TMUX_ENABLED && h.protocol !== "telnet" ? () => tmuxConnect(h.id) : undefined;
 
   const selArr = [...selected];
 
@@ -280,6 +299,7 @@ export function HostsPage() {
                   onClick={() => connect(h.id)}
                   onDragStart={() => {}}
                   onConnect={() => connect(h.id)}
+                  onTmux={tmuxProp(h)}
                   onEdit={() => setEditingHost(h)}
                   onDuplicate={() => duplicateHost(h.id)}
                   onDelete={() => deleteHost(h.id)}
@@ -328,6 +348,7 @@ export function HostsPage() {
                       onClick={(e) => handleClick(e, h.id)}
                       onDragStart={(e) => startDrag(e, h.id)}
                       onConnect={() => connect(h.id)}
+                      onTmux={tmuxProp(h)}
                       onEdit={() => setEditingHost(h)}
                       onDuplicate={() => duplicateHost(h.id)}
                       onDelete={() => deleteHost(h.id)}

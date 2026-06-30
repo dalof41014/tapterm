@@ -42,7 +42,6 @@ export function TmuxView({ tab }: { tab: Tab }) {
   const pendingOutputRef = useRef<Map<number, string[]>>(new Map());
   const cellSizeRef = useRef<{ w: number; h: number }>({ w: EST_CELL_W, h: EST_CELL_H });
   const lastDimsRef = useRef<{ cols: number; rows: number }>({ cols: 0, rows: 0 });
-  const firstWindowsRef = useRef(true);
 
   const setTabStatus = useStore((s) => s.setTabStatus);
   const host = useStore((s) => s.vault.hosts.find((h) => h.id === tab.hostId));
@@ -57,7 +56,60 @@ export function TmuxView({ tab }: { tab: Tab }) {
 
   useEffect(() => {
     let disposed = false;
+    let attempts = 0;
+    let openedAt = 0;
+    let connectedThisTry = false;
+    let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+    const MAX_FAST = 6;
     const unlisteners: UnlistenFn[] = [];
+
+    const computeDims = () => {
+      const b = containerRef.current;
+      if (b && b.offsetWidth && b.offsetHeight) {
+        const { w, h } = cellSizeRef.current;
+        return {
+          cols: Math.max(2, Math.round(b.offsetWidth / w)),
+          rows: Math.max(2, Math.round(b.offsetHeight / h)),
+        };
+      }
+      return { cols: 80, rows: 24 };
+    };
+
+    const connect = () => {
+      connectedThisTry = false;
+      openedAt = Date.now();
+      const { cols, rows } = computeDims();
+      lastDimsRef.current = { cols, rows };
+      tmuxOpen(tab.id, tab.hostId, cols, rows, tab.tmuxSession ?? "tapterm").catch((err) => {
+        if (!disposed) onClosed(String(err));
+      });
+    };
+
+    // tmux control-mode sessions live on the server, so a dropped channel just
+    // means we detached — auto-reattach (tmux -CC new -A) with backoff. Rapid
+    // exits (e.g. tmux not installed) accumulate and eventually give up.
+    const onClosed = (errMsg?: string) => {
+      if (disposed) return;
+      if (connectedThisTry || Date.now() - openedAt > 5000) attempts = 0;
+      attempts += 1;
+      if (attempts > MAX_FAST) {
+        setTabStatus(
+          tab.id,
+          "error",
+          errMsg || "tmux reconnect failed — is tmux installed on the host?",
+        );
+        for (const { term } of paneTermsRef.current.values())
+          term.write("\r\n\x1b[31m[ tmux reconnect failed — check that tmux is installed ]\x1b[0m\r\n");
+        return;
+      }
+      setTabStatus(tab.id, "connecting");
+      for (const { term } of paneTermsRef.current.values())
+        term.write("\r\n\x1b[2m[ disconnected — reattaching… ]\x1b[0m\r\n");
+      const delay = Math.min(8000, 500 * 2 ** (attempts - 1));
+      reconnectTimer = setTimeout(() => {
+        if (!disposed) connect();
+      }, delay);
+    };
 
     (async () => {
       const uOutput = await listen<{ pane: number; data: string }>(
@@ -84,8 +136,9 @@ export function TmuxView({ tab }: { tab: Tab }) {
             const active = ws.find((w) => w.active);
             return active ? active.id : ws.length ? ws[0].id : null;
           });
-          if (firstWindowsRef.current) {
-            firstWindowsRef.current = false;
+          if (!connectedThisTry) {
+            connectedThisTry = true;
+            attempts = 0;
             setTabStatus(tab.id, "connected");
           }
         },
@@ -98,12 +151,7 @@ export function TmuxView({ tab }: { tab: Tab }) {
           setLayouts((m) => ({ ...m, [e.payload.window]: tree }));
         },
       );
-      const uClosed = await listen(`tmux://closed/${tab.id}`, () => {
-        setTabStatus(tab.id, "closed");
-        for (const { term } of paneTermsRef.current.values()) {
-          term.write("\r\n\x1b[2m[ tmux detached ]\x1b[0m\r\n");
-        }
-      });
+      const uClosed = await listen(`tmux://closed/${tab.id}`, () => onClosed());
       if (disposed) {
         uOutput();
         uWindows();
@@ -114,20 +162,10 @@ export function TmuxView({ tab }: { tab: Tab }) {
       unlisteners.push(uOutput, uWindows, uLayout, uClosed);
     })();
 
-    // Initial cols/rows from the container box using an estimated cell size.
-    const box = containerRef.current;
-    let cols = 80;
-    let rows = 24;
-    if (box && box.offsetWidth && box.offsetHeight) {
-      cols = Math.max(2, Math.round(box.offsetWidth / EST_CELL_W));
-      rows = Math.max(2, Math.round(box.offsetHeight / EST_CELL_H));
-    }
-    lastDimsRef.current = { cols, rows };
-    tmuxOpen(tab.id, tab.hostId, cols, rows, tab.tmuxSession ?? "tapterm").catch((err) => {
-      if (!disposed) setTabStatus(tab.id, "error", String(err));
-    });
+    connect();
 
     // Whole-viewport resize → refresh-client -C, using the measured cell size.
+    const box = containerRef.current;
     let ro: ResizeObserver | undefined;
     if (box) {
       ro = new ResizeObserver(() => {
@@ -145,6 +183,7 @@ export function TmuxView({ tab }: { tab: Tab }) {
 
     return () => {
       disposed = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
       ro?.disconnect();
       for (const u of unlisteners) u();
       for (const { term } of paneTermsRef.current.values()) {
@@ -179,8 +218,6 @@ export function TmuxView({ tab }: { tab: Tab }) {
     [tab.id, focusedPane, themeId, resolvedFont],
   );
 
-  const tree = selectedWindow != null ? layouts[selectedWindow] : undefined;
-
   return (
     <div className="flex h-full flex-col bg-[#0B1220]">
       <WindowSwitcherBar
@@ -205,19 +242,32 @@ export function TmuxView({ tab }: { tab: Tab }) {
         }
       />
       <div ref={containerRef} className="relative min-h-0 flex-1">
-        {tree ? (
-          <SplitPane
-            node={tree}
-            focusedPane={focusedPane}
-            onFocusPane={setFocusedPane}
-            renderLeaf={renderLeaf}
-            onResizePane={(pane, dir, cells) =>
-              tmuxCommand(tab.id, `resize-pane -t %${pane} -${dir} ${cells}`).catch(() => {})
-            }
-          />
-        ) : (
+        {windows.length === 0 && (
           <div className="p-3 text-xs opacity-60">connecting tmux…</div>
         )}
+        {/* Keep every window mounted (display toggle) so switching windows never
+            disposes a pane's xterm and loses its content. */}
+        {windows.map((w) => {
+          const wtree = layouts[w.id];
+          if (!wtree) return null;
+          return (
+            <div
+              key={w.id}
+              className="absolute inset-0"
+              style={{ display: w.id === selectedWindow ? "block" : "none" }}
+            >
+              <SplitPane
+                node={wtree}
+                focusedPane={focusedPane}
+                onFocusPane={setFocusedPane}
+                renderLeaf={renderLeaf}
+                onResizePane={(pane, dir, cells) =>
+                  tmuxCommand(tab.id, `resize-pane -t %${pane} -${dir} ${cells}`).catch(() => {})
+                }
+              />
+            </div>
+          );
+        })}
       </div>
     </div>
   );
