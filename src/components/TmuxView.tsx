@@ -208,9 +208,11 @@ export function TmuxView({ tab }: { tab: Tab }) {
       // failed kill also voids any close-tab intent.
       const uError = await listen<{ message: string }>(
         `tmux://error/${tab.id}`,
-        (e) => {
-          expectingCloseRef.current = false;
-          setTabStatus(tab.id, "error", e.payload.message);
+        () => {
+          // A command-level %error (e.g. a kill/query targeting an already-gone
+          // pane during teardown) is NOT a connection failure — the session is
+          // still alive. Do NOT mark the tab errored (red) and do NOT void the
+          // close intent (killing the last window legitimately ends the session).
         },
       );
       if (disposed) {
@@ -324,10 +326,28 @@ export function TmuxView({ tab }: { tab: Tab }) {
 
   const closeWindow = useCallback(
     (w: number) => {
-      if (willCloseTab("window")) expectingCloseRef.current = true;
+      const willClose = willCloseTab("window");
+      if (willClose) expectingCloseRef.current = true;
       tmuxCommand(tab.id, `kill-window -t @${w}`).catch(() => {});
+      if (willClose) return; // the tab itself will close via onClosed()
+      // Optimistically drop the window now so it disappears immediately instead
+      // of waiting on the backend re-bootstrap (which can lag/be swallowed by a
+      // benign %error during teardown). A later windows snapshot reconciles.
+      setWindows((ws) => ws.filter((x) => x.id !== w));
+      setSelectedWindow((cur) => {
+        if (cur !== w) return cur;
+        const rest = windows.filter((x) => x.id !== w);
+        const next = rest.find((x) => x.active) ?? rest[0];
+        return next ? next.id : null;
+      });
+      setLayouts((m) => {
+        if (!(w in m)) return m;
+        const next = { ...m };
+        delete next[w];
+        return next;
+      });
     },
-    [tab.id, willCloseTab],
+    [tab.id, willCloseTab, windows],
   );
 
   const selectWindow = useCallback(
